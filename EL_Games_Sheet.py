@@ -10,8 +10,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 # Función para obtener los nombres de los juegos de Nutaku
-def get_nutaku_top_game_names():
-    nutaku_url = 'https://www.nutaku.net/games/genre/tag/pc-browser/os/dev/pub/lang/filter/price/features/status/ranking/'
+def get_nutaku_top_game_names(nutaku_url):
     response = requests.get(nutaku_url)
     
     if response.status_code == 200:
@@ -53,31 +52,34 @@ def get_ero_labs_top_game_names():
     driver.quit()
     return ero_labs_top_game_names
 
-
 # Función para escribir los nombres de los juegos en Google Sheets
-def write_to_google_sheets(nutaku_games, ero_labs_games):
+def write_to_google_sheets(sheet, game_names, sheet_index):
     today = datetime.now().strftime('%Y-%m-%d')
 
-    credentials = service_account.Credentials.from_service_account_file('/Users/carlosgarciagonzalez/Documents/BotNTK/topgamesntk-bef66ad4669f.json', 
-                                                                         scopes=['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive'])
+    # Escribe en la hoja correspondiente
+    worksheet = sheet.get_worksheet(sheet_index)
+    data = [today] + game_names
+    worksheet.append_row(data)
 
-    gc = gspread.authorize(credentials)
-    sheet = gc.open('EF Nutaku top games bot')
+    print(f'Los resultados se han guardado en la hoja {sheet_index} de Google Sheets')
 
-    # Escribe en la primera hoja (Nutaku)
-    worksheet_nutaku = sheet.get_worksheet(0)
-    data_nutaku = [today] + nutaku_games
-    worksheet_nutaku.append_row(data_nutaku)
+# URLs y números de hoja correspondientes a cada consulta de Nutaku
+nutaku_queries = [
+    ('https://www.nutaku.net/games/genre/tag/pc-browser/os/dev/pub/lang/filter/price/features/status/ranking/', 0),
+    ('https://www.nutaku.net/games/genre/tag/mobile/os/dev/pub/lang/filter/price/features/status/ranking/', 1),
+    ('https://www.nutaku.net/games/', 2)
+]
 
-    # Escribe en la segunda hoja (Ero-Labs)
-    worksheet_erolabs = sheet.get_worksheet(1)
-    data_erolabs = [today] + ero_labs_games
-    worksheet_erolabs.append_row(data_erolabs)
+# Definir sheet fuera del bucle for
+credentials = service_account.Credentials.from_service_account_file('/Users/carlosgarciagonzalez/Documents/BotNTK/topgamesntk-bef66ad4669f.json', 
+                                                                     scopes=['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive'])
+gc = gspread.authorize(credentials)
+sheet = gc.open('EF Nutaku top games bot')
 
-    print('Los resultados se han guardado en Google Sheets')
-
-# Obtén los nombres de los juegos de Nutaku
-nutaku_top_game_names = get_nutaku_top_game_names()
+# Realiza las consultas de Nutaku y guarda los resultados en hojas diferentes
+for query_url, sheet_index in nutaku_queries:
+    nutaku_top_game_names = get_nutaku_top_game_names(query_url)
+    write_to_google_sheets(sheet, nutaku_top_game_names, sheet_index)
 
 # Obtén los nombres de los juegos de Ero-Labs
 ero_labs_top_game_names = get_ero_labs_top_game_names()
@@ -85,5 +87,5 @@ ero_labs_top_game_names = get_ero_labs_top_game_names()
 # Ajusta la lista de juegos de Ero-Labs para contener solo los primeros 19
 ero_labs_top_game_names = ero_labs_top_game_names[:19]
 
-# Escribe los nombres en el documento de Google Sheets
-write_to_google_sheets(nutaku_top_game_names, ero_labs_top_game_names)
+# Escribe los nombres en la cuarta hoja del documento de Google Sheets
+write_to_google_sheets(sheet, ero_labs_top_game_names, 3)
