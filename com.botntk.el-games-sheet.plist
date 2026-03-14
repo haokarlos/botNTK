@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.botntk.el-games-sheet</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/carlosgarciagonzalez/Documents/BotNTK/run_el_games_sheet.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/carlosgarciagonzalez/Documents/BotNTK</string>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>9</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/carlosgarciagonzalez/Documents/BotNTK/logs/launchd.stdout.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/carlosgarciagonzalez/Documents/BotNTK/logs/launchd.stderr.log</string>
+</dict>
+</plist>
