@@ -1,7 +1,6 @@
-topgamesntk-bef66ad4669f.json
+__pycache__/
+*.pyc
 venv/
 env/
 logs/
-__pycache__/
-__pycache__/
-*.pyc
+topgamesntk-bef66ad4669f.json
