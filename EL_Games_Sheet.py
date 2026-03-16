@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 import json
 import os
 from pathlib import Path
@@ -260,7 +260,7 @@ def upsert_game_alias(conn, storefront_id, title):
 
 
 def save_snapshot_to_postgres(conn, storefront_slug, source_url, game_names):
-    captured_at = datetime.utcnow()
+    captured_at = datetime.now(UTC)
     capture_date = captured_at.date()
     storefront_id = get_storefront_id(conn, storefront_slug)
 

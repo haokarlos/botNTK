@@ -48,10 +48,23 @@ create table if not exists game_aliases (
     first_seen_at timestamptz not null default now(),
     last_seen_at timestamptz not null default now(),
     created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now(),
-    constraint game_aliases_platform_store_game_id_unique unique nulls not distinct (platform_id, store_game_id),
-    constraint game_aliases_platform_url_unique unique nulls not distinct (platform_id, url)
+    updated_at timestamptz not null default now()
 );
+
+drop index if exists game_aliases_platform_store_game_id_unique;
+drop index if exists game_aliases_platform_url_unique;
+alter table game_aliases
+    drop constraint if exists game_aliases_platform_store_game_id_unique;
+alter table game_aliases
+    drop constraint if exists game_aliases_platform_url_unique;
+
+create unique index if not exists game_aliases_platform_store_game_id_unique
+    on game_aliases (platform_id, store_game_id)
+    where store_game_id is not null;
+
+create unique index if not exists game_aliases_platform_url_unique
+    on game_aliases (platform_id, url)
+    where url is not null;
 
 create index if not exists game_aliases_game_id_idx
     on game_aliases (game_id);
