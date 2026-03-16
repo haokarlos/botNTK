@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BotNTK Market Radar</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-page="home">
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero__eyebrow">Market radar for adult games</div>
+        <div class="hero__grid">
+          <section>
+            <h1>Track Nutaku and EroLabs like a category dashboard, not a spreadsheet.</h1>
+            <p class="hero__copy">
+              Current leaders, searchable catalog, and daily ranking intelligence from your own dataset.
+            </p>
+          </section>
+          <aside class="hero__panel">
+            <div class="metric-card">
+              <span class="metric-card__label">Live source</span>
+              <strong id="selected-storefront-label">Loading storefronts...</strong>
+            </div>
+            <div class="metric-card">
+              <span class="metric-card__label">Last snapshot</span>
+              <strong id="capture-date-label">-</strong>
+            </div>
+          </aside>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel controls">
+          <div class="field">
+            <label for="storefront-select">Storefront</label>
+            <select id="storefront-select"></select>
+          </div>
+          <div class="field">
+            <label for="search-input">Search games</label>
+            <div class="search-row">
+              <input id="search-input" type="search" placeholder="Search by game title" />
+              <button id="search-button" type="button">Search</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <h2>Current ranking</h2>
+            <span class="panel__subtle" id="ranking-subtitle">Waiting for data</span>
+          </div>
+          <div id="ranking-list" class="ranking-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <h2>Search results</h2>
+            <span class="panel__subtle">Jump to game history</span>
+          </div>
+          <div id="search-results" class="search-results empty-state">Run a search to see matching games.</div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+  </html>

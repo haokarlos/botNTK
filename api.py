@@ -1,13 +1,19 @@
 import os
 from contextlib import contextmanager
+from pathlib import Path
 
 import psycopg
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+BASE_DIR = Path(__file__).resolve().parent
+WEB_DIR = BASE_DIR / "web"
 
 app = FastAPI(title="BotNTK API", version="0.1.0")
+app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 
 def get_database_url():
@@ -28,6 +34,45 @@ def get_conn():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/")
+def root():
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/game")
+def game_page():
+    return FileResponse(WEB_DIR / "game.html")
+
+
+@app.get("/storefronts")
+def list_storefronts():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select sf.slug, sf.name, sf.region, sf.device_type, p.slug as platform_slug
+                from storefronts sf
+                join platforms p on p.id = sf.platform_id
+                where sf.is_active = true
+                order by p.slug asc, sf.name asc
+                """
+            )
+            rows = cur.fetchall()
+
+    return {
+        "storefronts": [
+            {
+                "slug": row[0],
+                "name": row[1],
+                "region": row[2],
+                "device_type": row[3],
+                "platform_slug": row[4],
+            }
+            for row in rows
+        ]
+    }
 
 
 @app.get("/rankings/current")
@@ -128,6 +173,64 @@ def search_games(
                 "platform_count": row[3],
             }
             for row in rows
+        ],
+    }
+
+
+@app.get("/games/{game_id}")
+def get_game_summary(game_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                with game_stats as (
+                    select
+                        g.id,
+                        g.canonical_name,
+                        min(re.rank) as best_rank,
+                        count(*) as ranking_points,
+                        max(rs.capture_date) as last_seen_date
+                    from games g
+                    left join game_aliases ga on ga.game_id = g.id
+                    left join ranking_entries re on re.game_alias_id = ga.id
+                    left join ranking_snapshots rs on rs.id = re.snapshot_id
+                    where g.id = %s
+                    group by g.id, g.canonical_name
+                )
+                select id, canonical_name, best_rank, ranking_points, last_seen_date
+                from game_stats
+                """,
+                (game_id,),
+            )
+            game_row = cur.fetchone()
+
+            if not game_row:
+                raise HTTPException(status_code=404, detail="Game not found.")
+
+            cur.execute(
+                """
+                select distinct
+                    sf.slug,
+                    sf.name,
+                    ga.title
+                from game_aliases ga
+                join storefronts sf on sf.id = ga.storefront_id
+                where ga.game_id = %s
+                order by sf.name asc, ga.title asc
+                """,
+                (game_id,),
+            )
+            aliases = cur.fetchall()
+
+    return {
+        "game_id": str(game_row[0]),
+        "canonical_name": game_row[1],
+        "best_rank": game_row[2],
+        "ranking_points": game_row[3],
+        "last_seen_date": str(game_row[4]) if game_row[4] else None,
+        "aliases": [
+            {"storefront_slug": row[0], "storefront_name": row[1], "alias_title": row[2]}
+            for row in aliases
         ],
     }
 

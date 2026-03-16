@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Game Detail | BotNTK Market Radar</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-page="game">
+    <div class="page-shell">
+      <header class="hero hero--compact">
+        <div class="hero__eyebrow"><a href="/" class="back-link">Back to dashboard</a></div>
+        <div class="hero__grid">
+          <section>
+            <h1 id="game-title">Loading game...</h1>
+            <p class="hero__copy" id="game-summary">Fetching ranking history and storefront aliases.</p>
+          </section>
+          <aside class="hero__panel">
+            <div class="metric-card">
+              <span class="metric-card__label">Best rank</span>
+              <strong id="best-rank-label">-</strong>
+            </div>
+            <div class="metric-card">
+              <span class="metric-card__label">Last seen</span>
+              <strong id="last-seen-label">-</strong>
+            </div>
+          </aside>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel">
+          <div class="panel__header">
+            <h2>Rank history</h2>
+            <span class="panel__subtle">Lower rank is better</span>
+          </div>
+          <div id="history-chart" class="chart-card"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <h2>Storefront aliases</h2>
+            <span class="panel__subtle">How this game appears across the dataset</span>
+          </div>
+          <div id="aliases-list" class="alias-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <h2>Timeline table</h2>
+            <span class="panel__subtle">Chronological ranking rows</span>
+          </div>
+          <div id="history-table" class="history-table"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+  </html>
