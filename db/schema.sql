@@ -82,9 +82,19 @@ create table if not exists ranking_snapshots (
     capture_date date not null,
     source_url text,
     status text not null default 'success',
+    data_source text not null default 'observed',
+    copied_from_snapshot_id uuid references ranking_snapshots(id) on delete set null,
+    notes text,
     raw_payload jsonb,
     created_at timestamptz not null default now()
 );
+
+alter table ranking_snapshots
+    add column if not exists data_source text not null default 'observed';
+alter table ranking_snapshots
+    add column if not exists copied_from_snapshot_id uuid references ranking_snapshots(id) on delete set null;
+alter table ranking_snapshots
+    add column if not exists notes text;
 
 create unique index if not exists ranking_snapshots_storefront_capture_date_idx
     on ranking_snapshots (storefront_id, capture_date);
