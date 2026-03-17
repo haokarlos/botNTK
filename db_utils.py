@@ -6,6 +6,20 @@ def normalize_title(value):
     return ' '.join(value.casefold().split())
 
 
+def normalize_game_entry(entry):
+    if isinstance(entry, dict):
+        title = (entry.get('title') or '').strip()
+        url = (entry.get('url') or '').strip() or None
+        if not title:
+            raise ValueError('La entrada del juego no tiene title.')
+        return {'title': title, 'url': url}
+
+    title = str(entry).strip()
+    if not title:
+        raise ValueError('La entrada del juego no tiene title.')
+    return {'title': title, 'url': None}
+
+
 def get_storefront_id(conn, storefront_slug):
     with conn.cursor() as cur:
         cur.execute(
@@ -24,7 +38,7 @@ def get_storefront_id(conn, storefront_slug):
     return row[0]
 
 
-def upsert_game_alias(conn, storefront_id, title):
+def upsert_game_alias(conn, storefront_id, title, url=None):
     normalized_title = normalize_title(title)
 
     with conn.cursor() as cur:
@@ -65,6 +79,7 @@ def upsert_game_alias(conn, storefront_id, title):
                 game_id,
                 platform_id,
                 storefront_id,
+                url,
                 title,
                 title_normalized,
                 first_seen_at,
@@ -74,6 +89,7 @@ def upsert_game_alias(conn, storefront_id, title):
                 rg.id,
                 sp.platform_id,
                 sp.storefront_id,
+                %s,
                 %s,
                 %s,
                 now(),
@@ -89,6 +105,7 @@ def upsert_game_alias(conn, storefront_id, title):
                 title,
                 normalized_title,
                 normalized_title,
+                url,
                 title,
                 normalized_title,
             ),
@@ -102,12 +119,13 @@ def upsert_game_alias(conn, storefront_id, title):
             update game_aliases
             set last_seen_at = now(),
                 updated_at = now(),
+                url = coalesce(%s, url),
                 title = %s
             where storefront_id = %s
               and title_normalized = %s
             returning id
             """,
-            (title, storefront_id, normalized_title),
+            (url, title, storefront_id, normalized_title),
         )
         row = cur.fetchone()
 
@@ -135,7 +153,7 @@ def save_snapshot_to_postgres(
     storefront_id = get_storefront_id(conn, storefront_slug)
 
     payload = {
-        'games': game_names,
+        'games': [normalize_game_entry(entry) for entry in game_names],
         'data_source': data_source,
         'notes': notes,
     }
@@ -188,8 +206,14 @@ def save_snapshot_to_postgres(
             (snapshot_id,),
         )
 
-    for rank, game_name in enumerate(game_names, start=1):
-        game_alias_id = upsert_game_alias(conn, storefront_id, game_name)
+    for rank, game_entry in enumerate(game_names, start=1):
+        normalized_entry = normalize_game_entry(game_entry)
+        game_alias_id = upsert_game_alias(
+            conn,
+            storefront_id,
+            normalized_entry['title'],
+            normalized_entry['url'],
+        )
         with conn.cursor() as cur:
             cur.execute(
                 """

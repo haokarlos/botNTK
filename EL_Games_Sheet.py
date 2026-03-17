@@ -23,12 +23,49 @@ GOOGLE_SCOPES = [
 DATABASE_URL = os.getenv('DATABASE_URL')
 
 
+def absolutize_url(base_url, maybe_url):
+    if not maybe_url:
+        return None
+    if maybe_url.startswith('http://') or maybe_url.startswith('https://'):
+        return maybe_url
+    if maybe_url.startswith('/'):
+        return f'https://www.nutaku.net{maybe_url}'
+    return f'{base_url.rstrip("/")}/{maybe_url.lstrip("/")}'
+
+
+def extract_nutaku_entries(soup, base_url):
+    entries = []
+    seen_titles = set()
+
+    for title_node in soup.find_all('span', class_='general-title'):
+        title = title_node.get_text(strip=True)
+        if not title:
+            continue
+        if title in seen_titles:
+            continue
+
+        anchor = title_node.find_parent('a', href=True)
+        if anchor is None:
+            parent = title_node.parent
+            if parent:
+                anchor = parent.find('a', href=True)
+
+        entries.append(
+            {
+                'title': title,
+                'url': absolutize_url(base_url, anchor.get('href')) if anchor else None,
+            }
+        )
+        seen_titles.add(title)
+
+    return entries
+
+
 def get_nutaku_top_game_names(nutaku_url):
     response = requests.get(nutaku_url, timeout=30)
     if response.status_code == 200:
         soup = BeautifulSoup(response.text, 'html.parser')
-        general_titles = [title.text for title in soup.find_all('span', class_='general-title')]
-        return general_titles
+        return extract_nutaku_entries(soup, nutaku_url)
 
     print(f'Error al acceder a la página de Nutaku. Código de estado: {response.status_code}')
     return []
@@ -53,16 +90,48 @@ def get_ero_labs_top_game_names():
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.home__topGameName')))
 
         soup = BeautifulSoup(driver.page_source, 'html.parser')
-        game_name_elements = soup.select('.home__topGameName h4')
-        return [element.get_text(strip=True) for element in game_name_elements]
+        entries = []
+        seen_titles = set()
+        for element in soup.select('.home__topGameName h4'):
+            title = element.get_text(strip=True)
+            if not title or title in seen_titles:
+                continue
+
+            anchor = element.find_parent('a', href=True)
+            if anchor is None:
+                parent = element.parent
+                if parent:
+                    anchor = parent.find('a', href=True)
+
+            url = anchor.get('href') if anchor else None
+            if url and url.startswith('/'):
+                url = f'https://www.ero-labs.com{url}'
+
+            entries.append({'title': title, 'url': url})
+            seen_titles.add(title)
+        return entries
     finally:
         driver.quit()
+
+
+def extract_titles(game_entries):
+    titles = []
+    for entry in game_entries:
+        if isinstance(entry, dict):
+            title = (entry.get('title') or '').strip()
+            if title:
+                titles.append(title)
+        else:
+            title = str(entry).strip()
+            if title:
+                titles.append(title)
+    return titles
 
 
 def write_to_google_sheets(sheet, game_names, sheet_index):
     today = datetime.now().strftime('%Y-%m-%d')
     worksheet = sheet.get_worksheet(sheet_index)
-    data = [today] + game_names
+    data = [today] + extract_titles(game_names)
     worksheet.append_row(data)
     print(f'Los resultados se han guardado en la hoja {sheet_index} de Google Sheets')
 
