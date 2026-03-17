@@ -26,6 +26,10 @@
               <span class="metric-card__label">Last snapshot</span>
               <strong id="capture-date-label">-</strong>
             </div>
+            <div class="metric-card">
+              <span class="metric-card__label">Snapshot type</span>
+              <strong id="snapshot-type-label">-</strong>
+            </div>
           </aside>
         </div>
       </header>
@@ -33,8 +37,18 @@
       <main class="layout">
         <section class="panel controls">
           <div class="field">
-            <label for="storefront-select">Storefront</label>
-            <select id="storefront-select"></select>
+            <label>Leaderboard view</label>
+            <div class="segmented" id="home-view-selector">
+              <button type="button" data-view="current" class="is-active">Day</button>
+              <button type="button" data-view="avg7">7D Avg</button>
+              <button type="button" data-view="avg30">30D Avg</button>
+            </div>
+          </div>
+          <div class="field">
+            <label class="toggle">
+              <input id="home-hide-imputed" type="checkbox" />
+              <span>Hide imputed current snapshots</span>
+            </label>
           </div>
           <div class="field">
             <label for="search-input">Search games</label>
@@ -47,10 +61,30 @@
 
         <section class="panel">
           <div class="panel__header">
-            <h2>Current ranking</h2>
-            <span class="panel__subtle" id="ranking-subtitle">Waiting for data</span>
+            <h2>Main boards</h2>
+            <span class="panel__subtle" id="ranking-subtitle">Compact top lists across the two main storefronts</span>
           </div>
-          <div id="ranking-list" class="ranking-list"></div>
+          <div class="board-grid">
+            <section class="compact-board">
+              <div class="compact-board__header">
+                <div>
+                  <h3>Nutaku All Games</h3>
+                  <span class="panel__subtle" id="nutaku-board-subtitle">Loading...</span>
+                </div>
+                <a class="ranking-link" href="#" id="nutaku-more-link">More</a>
+              </div>
+              <div id="nutaku-board" class="compact-board__list"></div>
+            </section>
+            <section class="compact-board">
+              <div class="compact-board__header">
+                <div>
+                  <h3>EroLabs Home</h3>
+                  <span class="panel__subtle" id="erolabs-board-subtitle">Loading...</span>
+                </div>
+              </div>
+              <div id="erolabs-board" class="compact-board__list"></div>
+            </section>
+          </div>
         </section>
 
         <section class="panel">

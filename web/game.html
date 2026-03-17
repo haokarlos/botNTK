@@ -21,6 +21,22 @@
               <strong id="best-rank-label">-</strong>
             </div>
             <div class="metric-card">
+              <span class="metric-card__label">Observed avg rank</span>
+              <strong id="observed-avg-rank-label">-</strong>
+            </div>
+            <div class="metric-card">
+              <span class="metric-card__label">Adjusted avg rank</span>
+              <strong id="adjusted-avg-rank-label">-</strong>
+            </div>
+            <div class="metric-card">
+              <span class="metric-card__label">First seen</span>
+              <strong id="first-seen-label">-</strong>
+            </div>
+            <div class="metric-card">
+              <span class="metric-card__label">Coverage</span>
+              <strong id="coverage-label">-</strong>
+            </div>
+            <div class="metric-card">
               <span class="metric-card__label">Last seen</span>
               <strong id="last-seen-label">-</strong>
             </div>
@@ -33,6 +49,18 @@
           <div class="panel__header">
             <h2>Rank history</h2>
             <span class="panel__subtle">Lower rank is better</span>
+          </div>
+          <div class="toolbar">
+            <div class="segmented" id="range-selector">
+              <button type="button" data-range="7">7D</button>
+              <button type="button" data-range="30">30D</button>
+              <button type="button" data-range="90">90D</button>
+              <button type="button" data-range="all" class="is-active">Total</button>
+            </div>
+            <label class="toggle">
+              <input id="hide-imputed-toggle" type="checkbox" checked />
+              <span>Hide imputed rows</span>
+            </label>
           </div>
           <div id="history-chart" class="chart-card"></div>
         </section>

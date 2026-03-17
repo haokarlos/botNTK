@@ -20,6 +20,16 @@ function renderEmpty(container, message) {
   container.innerHTML = `<div class="empty-state">${message}</div>`;
 }
 
+function formatNumber(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
+}
+
+function formatPercent(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  return `${(value * 100).toFixed(1)}%`;
+}
+
 function formatDataSource(value) {
   const mapping = {
     observed: "Observed",
@@ -31,6 +41,26 @@ function formatDataSource(value) {
 
 function badgeClass(value) {
   return `source-badge source-badge--${value || "unknown"}`;
+}
+
+function filterHistory(history, { hideImputed = false, range = "all" } = {}) {
+  let filtered = hideImputed ? history.filter((entry) => entry.data_source !== "imputed") : [...history];
+  if (!filtered.length) return filtered;
+
+  if (range !== "all") {
+    const days = Number(range);
+    const lastDate = new Date(filtered[filtered.length - 1].capture_date);
+    const threshold = new Date(lastDate);
+    threshold.setDate(lastDate.getDate() - (days - 1));
+    filtered = filtered.filter((entry) => new Date(entry.capture_date) >= threshold);
+  }
+
+  return filtered;
+}
+
+function computeWindowAverage(history) {
+  if (!history.length) return null;
+  return history.reduce((sum, entry) => sum + entry.rank, 0) / history.length;
 }
 
 function renderHistoryChart(container, history) {
@@ -83,58 +113,50 @@ function renderHistoryChart(container, history) {
 }
 
 async function initHome() {
-  const storefrontSelect = document.querySelector("#storefront-select");
   const selectedStorefrontLabel = document.querySelector("#selected-storefront-label");
   const captureDateLabel = document.querySelector("#capture-date-label");
+  const snapshotTypeLabel = document.querySelector("#snapshot-type-label");
   const rankingSubtitle = document.querySelector("#ranking-subtitle");
-  const rankingList = document.querySelector("#ranking-list");
+  const nutakuBoard = document.querySelector("#nutaku-board");
+  const erolabsBoard = document.querySelector("#erolabs-board");
+  const nutakuBoardSubtitle = document.querySelector("#nutaku-board-subtitle");
+  const erolabsBoardSubtitle = document.querySelector("#erolabs-board-subtitle");
+  const nutakuMoreLink = document.querySelector("#nutaku-more-link");
   const searchInput = document.querySelector("#search-input");
   const searchButton = document.querySelector("#search-button");
   const searchResults = document.querySelector("#search-results");
+  const homeHideImputed = document.querySelector("#home-hide-imputed");
+  const homeViewSelector = document.querySelector("#home-view-selector");
+  let selectedView = "current";
 
-  const storefrontData = await fetchJson("/storefronts");
-  const storefronts = storefrontData.storefronts;
-
-  storefrontSelect.innerHTML = storefronts
-    .map(
-      (storefront) =>
-        `<option value="${storefront.slug}">${storefront.name} · ${storefront.platform_slug}</option>`
-    )
-    .join("");
-
-  async function loadRankings(storefrontSlug) {
-    const data = await fetchJson(`/rankings/current?storefront=${encodeURIComponent(storefrontSlug)}`);
-    selectedStorefrontLabel.textContent = data.storefront.name;
-    captureDateLabel.textContent = formatDate(data.capture_date);
-    rankingSubtitle.innerHTML = `${data.entries.length} visible ranks <span class="${badgeClass(
-      data.data_source
-    )}">${formatDataSource(data.data_source)}</span>`;
-    rankingList.innerHTML = data.entries
-      .map(
-        (entry) => `
-          <article class="ranking-item">
-            <div class="ranking-rank">${entry.rank}</div>
-            <div class="ranking-meta">
-              <strong>${entry.canonical_name}</strong>
-              <span>${entry.alias_title}</span>
-            </div>
-            <a class="ranking-link" href="/game?id=${entry.game_id}">Open history</a>
-          </article>
-        `
-      )
-      .join("");
+  function renderMovement(entry) {
+    if (entry.is_new) {
+      return `<span class="movement movement--new">New</span>`;
+    }
+    if (!entry.movement) {
+      return `<span class="movement movement--flat">0</span>`;
+    }
+    if (entry.movement > 0) {
+      return `<span class="movement movement--up">${entry.movement}▲</span>`;
+    }
+    return `<span class="movement movement--down">${Math.abs(entry.movement)}▼</span>`;
   }
 
   async function runSearch() {
     const query = searchInput.value.trim();
     if (!query) {
       renderEmpty(searchResults, "Write a game title to search.");
+      searchResults.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
+
+    renderEmpty(searchResults, `Searching for "${query}"...`);
+    searchResults.scrollIntoView({ behavior: "smooth", block: "start" });
 
     const data = await fetchJson(`/games/search?q=${encodeURIComponent(query)}`);
     if (!data.results.length) {
       renderEmpty(searchResults, "No matching games found.");
+      searchResults.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
 
@@ -151,19 +173,91 @@ async function initHome() {
         `
       )
       .join("");
+    searchResults.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  storefrontSelect.addEventListener("change", () => loadRankings(storefrontSelect.value));
+  function renderCompactBoard(container, entries, maxItems) {
+    container.innerHTML = entries
+      .slice(0, maxItems)
+      .map(
+        (entry) => `
+          <article class="compact-row">
+            <div class="compact-row__left">
+              <span class="compact-row__rank">${entry.position}</span>
+              <span class="compact-row__movement">${renderMovement(entry)}</span>
+            </div>
+            <div class="compact-row__body">
+              <strong>${entry.canonical_name}</strong>
+              <span>${entry.alias_title}</span>
+            </div>
+            <div class="compact-row__meta">
+              <span class="compact-row__value">${formatNumber(entry.metric_value)}</span>
+              <a class="ranking-link" href="/game?id=${entry.game_id}">Open</a>
+            </div>
+          </article>
+        `
+      )
+      .join("");
+  }
+
+  async function loadCompactLeaderboards() {
+    const [nutakuCurrent, erolabsCurrent, nutakuCompact, erolabsCompact] = await Promise.all([
+      fetchJson(`/rankings/current?storefront=nutaku-all-games`),
+      fetchJson(`/rankings/current?storefront=erolabs-home-ranking`),
+      fetchJson(`/leaderboards?storefront=nutaku-all-games&view=${encodeURIComponent(selectedView)}&limit=20`),
+      fetchJson(`/leaderboards?storefront=erolabs-home-ranking&view=${encodeURIComponent(selectedView)}&limit=20`),
+    ]);
+
+    selectedStorefrontLabel.textContent = "Nutaku All + EroLabs";
+    captureDateLabel.textContent = `${formatDate(nutakuCompact.latest_date)} / ${formatDate(erolabsCompact.latest_date)}`;
+    snapshotTypeLabel.innerHTML = `${homeHideImputed.checked ? "Filtered" : "Mixed"} snapshots`;
+
+    if (homeHideImputed.checked && nutakuCurrent.data_source === "imputed" && erolabsCurrent.data_source === "imputed") {
+      rankingSubtitle.textContent = "Both latest snapshots are imputed and hidden by filter";
+      renderEmpty(nutakuBoard, "Nutaku current snapshot is imputed. Disable the filter to show the compact board.");
+      renderEmpty(erolabsBoard, "EroLabs current snapshot is imputed. Disable the filter to show the compact board.");
+      return;
+    }
+
+    rankingSubtitle.textContent =
+      selectedView === "current"
+        ? "Daily position with day-over-day movement"
+        : selectedView === "avg7"
+          ? "7-day average rank with movement vs previous 7-day window"
+          : "30-day average rank with movement vs previous 30-day window";
+
+    nutakuBoardSubtitle.textContent = `${formatDataSource(nutakuCurrent.data_source)} snapshot · top 20`;
+    erolabsBoardSubtitle.textContent = `${formatDataSource(erolabsCurrent.data_source)} snapshot · top 20`;
+    nutakuMoreLink.href = "/?storefront=nutaku-all-games";
+
+    if (homeHideImputed.checked && nutakuCurrent.data_source === "imputed") {
+      renderEmpty(nutakuBoard, "Nutaku latest snapshot is imputed. Disable the filter to show it.");
+    } else {
+      renderCompactBoard(nutakuBoard, nutakuCompact.entries, 20);
+    }
+
+    if (homeHideImputed.checked && erolabsCurrent.data_source === "imputed") {
+      renderEmpty(erolabsBoard, "EroLabs latest snapshot is imputed. Disable the filter to show it.");
+    } else {
+      renderCompactBoard(erolabsBoard, erolabsCompact.entries, 20);
+    }
+  }
+
+  homeHideImputed.addEventListener("change", loadCompactLeaderboards);
+  homeViewSelector.querySelectorAll("button").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedView = button.dataset.view;
+      homeViewSelector.querySelectorAll("button").forEach((node) => node.classList.remove("is-active"));
+      button.classList.add("is-active");
+      loadCompactLeaderboards();
+    });
+  });
   searchButton.addEventListener("click", runSearch);
   searchInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") runSearch();
   });
 
-  if (storefronts.length) {
-    await loadRankings(storefronts[0].slug);
-  } else {
-    renderEmpty(rankingList, "No storefronts configured yet.");
-  }
+  await loadCompactLeaderboards();
 }
 
 async function initGame() {
@@ -171,10 +265,16 @@ async function initGame() {
   const gameTitle = document.querySelector("#game-title");
   const gameSummary = document.querySelector("#game-summary");
   const bestRankLabel = document.querySelector("#best-rank-label");
+  const observedAvgRankLabel = document.querySelector("#observed-avg-rank-label");
+  const adjustedAvgRankLabel = document.querySelector("#adjusted-avg-rank-label");
+  const firstSeenLabel = document.querySelector("#first-seen-label");
+  const coverageLabel = document.querySelector("#coverage-label");
   const lastSeenLabel = document.querySelector("#last-seen-label");
   const aliasesList = document.querySelector("#aliases-list");
   const historyChart = document.querySelector("#history-chart");
   const historyTable = document.querySelector("#history-table");
+  const hideImputedToggle = document.querySelector("#hide-imputed-toggle");
+  const rangeSelector = document.querySelector("#range-selector");
 
   if (!gameId) {
     gameTitle.textContent = "Missing game id";
@@ -195,9 +295,12 @@ async function initGame() {
   const sourceSummary = Object.entries(sourceCounts)
     .map(([source, count]) => `${count} ${formatDataSource(source).toLowerCase()}`)
     .join(" · ");
-  gameSummary.textContent = `${summary.ranking_points} ranking points collected across all tracked storefronts. ${sourceSummary}`;
-  bestRankLabel.textContent = summary.best_rank ?? "-";
-  lastSeenLabel.textContent = formatDate(summary.last_seen_date);
+  if (bestRankLabel) bestRankLabel.textContent = summary.best_rank ?? "-";
+  if (observedAvgRankLabel) observedAvgRankLabel.textContent = formatNumber(summary.observed_avg_rank_overall);
+  if (adjustedAvgRankLabel) adjustedAvgRankLabel.textContent = formatNumber(summary.adjusted_avg_rank_overall);
+  if (firstSeenLabel) firstSeenLabel.textContent = formatDate(summary.first_seen_date);
+  if (coverageLabel) coverageLabel.textContent = formatPercent(summary.coverage_ratio);
+  if (lastSeenLabel) lastSeenLabel.textContent = formatDate(summary.last_seen_date);
 
   aliasesList.innerHTML = summary.aliases.length
     ? summary.aliases
@@ -212,41 +315,70 @@ async function initGame() {
         .join("")
     : `<div class="empty-state">No aliases recorded.</div>`;
 
-  renderHistoryChart(historyChart, history.history);
+  let selectedRange = "all";
 
-  if (!history.history.length) {
-    renderEmpty(historyTable, "No historical rows available.");
-    return;
+  function renderGameState() {
+    const filteredHistory = filterHistory(history.history, {
+      hideImputed: hideImputedToggle.checked,
+      range: selectedRange,
+    });
+    const windowAverage = computeWindowAverage(filteredHistory);
+    gameSummary.textContent = `${summary.ranking_points} ranking points collected across all tracked storefronts. ${sourceSummary}. Observed window avg rank: ${formatNumber(
+      windowAverage
+    )}.`;
+
+    renderHistoryChart(historyChart, filteredHistory);
+
+    if (!filteredHistory.length) {
+      renderEmpty(historyTable, "No historical rows available with the active filters.");
+      return;
+    }
+
+    historyTable.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Storefront</th>
+            <th>Rank</th>
+            <th>Source</th>
+            <th>Alias</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filteredHistory
+            .map(
+              (entry) => `
+                <tr>
+                  <td>${formatDate(entry.capture_date)}</td>
+                  <td>${entry.storefront}</td>
+                  <td>${entry.rank}</td>
+                  <td><span class="${badgeClass(entry.data_source)}">${formatDataSource(entry.data_source)}</span></td>
+                  <td>${entry.alias_title}</td>
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    `;
   }
 
-  historyTable.innerHTML = `
-    <table>
-      <thead>
-        <tr>
-          <th>Date</th>
-          <th>Storefront</th>
-          <th>Rank</th>
-          <th>Source</th>
-          <th>Alias</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${history.history
-          .map(
-            (entry) => `
-              <tr>
-                <td>${formatDate(entry.capture_date)}</td>
-                <td>${entry.storefront}</td>
-                <td>${entry.rank}</td>
-                <td><span class="${badgeClass(entry.data_source)}">${formatDataSource(entry.data_source)}</span></td>
-                <td>${entry.alias_title}</td>
-              </tr>
-            `
-          )
-          .join("")}
-      </tbody>
-    </table>
-  `;
+  if (hideImputedToggle) {
+    hideImputedToggle.addEventListener("change", renderGameState);
+  }
+  if (rangeSelector) {
+    rangeSelector.querySelectorAll("button").forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedRange = button.dataset.range;
+        rangeSelector.querySelectorAll("button").forEach((node) => node.classList.remove("is-active"));
+        button.classList.add("is-active");
+        renderGameState();
+      });
+    });
+  }
+
+  renderGameState();
 }
 
 async function main() {
