@@ -115,6 +115,38 @@ a {
   font-size: 0.92rem;
 }
 
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.77rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.source-badge--observed {
+  color: #0b4d2b;
+  background: rgba(113, 201, 140, 0.28);
+}
+
+.source-badge--sheet_import {
+  color: #6a4502;
+  background: rgba(232, 192, 109, 0.35);
+}
+
+.source-badge--imputed {
+  color: #6f1f0f;
+  background: rgba(214, 111, 88, 0.26);
+}
+
+.source-badge--unknown {
+  color: var(--muted);
+  background: rgba(109, 98, 90, 0.12);
+}
+
 .layout {
   display: grid;
   gap: 20px;
@@ -265,6 +297,14 @@ button {
 
 .chart-point {
   fill: var(--accent-strong);
+}
+
+.chart-point--sheet_import {
+  fill: #c98016;
+}
+
+.chart-point--imputed {
+  fill: #d06049;
 }
 
 .chart-axis,

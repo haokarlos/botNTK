@@ -20,6 +20,19 @@ function renderEmpty(container, message) {
   container.innerHTML = `<div class="empty-state">${message}</div>`;
 }
 
+function formatDataSource(value) {
+  const mapping = {
+    observed: "Observed",
+    sheet_import: "Imported",
+    imputed: "Imputed",
+  };
+  return mapping[value] || value || "Unknown";
+}
+
+function badgeClass(value) {
+  return `source-badge source-badge--${value || "unknown"}`;
+}
+
 function renderHistoryChart(container, history) {
   if (!history.length) {
     renderEmpty(container, "No ranking history available for this game yet.");
@@ -53,7 +66,7 @@ function renderHistoryChart(container, history) {
       ${points
         .map(
           (point) => `
-            <circle class="chart-point" cx="${point.x}" cy="${point.y}" r="4"></circle>
+            <circle class="chart-point chart-point--${point.data_source}" cx="${point.x}" cy="${point.y}" r="4"></circle>
           `
         )
         .join("")}
@@ -93,7 +106,9 @@ async function initHome() {
     const data = await fetchJson(`/rankings/current?storefront=${encodeURIComponent(storefrontSlug)}`);
     selectedStorefrontLabel.textContent = data.storefront.name;
     captureDateLabel.textContent = formatDate(data.capture_date);
-    rankingSubtitle.textContent = `${data.entries.length} visible ranks`;
+    rankingSubtitle.innerHTML = `${data.entries.length} visible ranks <span class="${badgeClass(
+      data.data_source
+    )}">${formatDataSource(data.data_source)}</span>`;
     rankingList.innerHTML = data.entries
       .map(
         (entry) => `
@@ -173,7 +188,14 @@ async function initGame() {
   ]);
 
   gameTitle.textContent = summary.canonical_name;
-  gameSummary.textContent = `${summary.ranking_points} ranking points collected across all tracked storefronts.`;
+  const sourceCounts = history.history.reduce((acc, entry) => {
+    acc[entry.data_source] = (acc[entry.data_source] || 0) + 1;
+    return acc;
+  }, {});
+  const sourceSummary = Object.entries(sourceCounts)
+    .map(([source, count]) => `${count} ${formatDataSource(source).toLowerCase()}`)
+    .join(" · ");
+  gameSummary.textContent = `${summary.ranking_points} ranking points collected across all tracked storefronts. ${sourceSummary}`;
   bestRankLabel.textContent = summary.best_rank ?? "-";
   lastSeenLabel.textContent = formatDate(summary.last_seen_date);
 
@@ -204,6 +226,7 @@ async function initGame() {
           <th>Date</th>
           <th>Storefront</th>
           <th>Rank</th>
+          <th>Source</th>
           <th>Alias</th>
         </tr>
       </thead>
@@ -215,6 +238,7 @@ async function initGame() {
                 <td>${formatDate(entry.capture_date)}</td>
                 <td>${entry.storefront}</td>
                 <td>${entry.rank}</td>
+                <td><span class="${badgeClass(entry.data_source)}">${formatDataSource(entry.data_source)}</span></td>
                 <td>${entry.alias_title}</td>
               </tr>
             `

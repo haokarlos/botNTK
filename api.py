@@ -85,7 +85,13 @@ def get_current_rankings(
             cur.execute(
                 """
                 with latest_snapshot as (
-                    select rs.id, rs.capture_date, sf.slug as storefront_slug, sf.name as storefront_name
+                    select
+                        rs.id,
+                        rs.capture_date,
+                        rs.data_source,
+                        rs.notes,
+                        sf.slug as storefront_slug,
+                        sf.name as storefront_name
                     from ranking_snapshots rs
                     join storefronts sf on sf.id = rs.storefront_id
                     where sf.slug = %s
@@ -94,6 +100,8 @@ def get_current_rankings(
                 )
                 select
                     ls.capture_date,
+                    ls.data_source,
+                    ls.notes,
                     ls.storefront_slug,
                     ls.storefront_name,
                     re.rank,
@@ -116,19 +124,23 @@ def get_current_rankings(
         raise HTTPException(status_code=404, detail="No rankings found for that storefront.")
 
     capture_date = rows[0][0]
-    storefront_slug = rows[0][1]
-    storefront_name = rows[0][2]
+    data_source = rows[0][1]
+    notes = rows[0][2]
+    storefront_slug = rows[0][3]
+    storefront_name = rows[0][4]
 
     return {
         "storefront": {"slug": storefront_slug, "name": storefront_name},
         "capture_date": str(capture_date),
+        "data_source": data_source,
+        "notes": notes,
         "entries": [
             {
-                "rank": row[3],
-                "game_id": str(row[4]),
-                "canonical_name": row[5],
-                "game_alias_id": str(row[6]),
-                "alias_title": row[7],
+                "rank": row[5],
+                "game_id": str(row[6]),
+                "canonical_name": row[7],
+                "game_alias_id": str(row[8]),
+                "alias_title": row[9],
             }
             for row in rows
         ],
@@ -259,7 +271,9 @@ def get_game_history(game_id: str, storefront: str | None = Query(default=None))
                         rs.capture_date,
                         sf.slug,
                         re.rank,
-                        ga.title
+                        ga.title,
+                        rs.data_source,
+                        rs.notes
                     from ranking_entries re
                     join ranking_snapshots rs on rs.id = re.snapshot_id
                     join storefronts sf on sf.id = rs.storefront_id
@@ -277,7 +291,9 @@ def get_game_history(game_id: str, storefront: str | None = Query(default=None))
                         rs.capture_date,
                         sf.slug,
                         re.rank,
-                        ga.title
+                        ga.title,
+                        rs.data_source,
+                        rs.notes
                     from ranking_entries re
                     join ranking_snapshots rs on rs.id = re.snapshot_id
                     join storefronts sf on sf.id = rs.storefront_id
@@ -298,6 +314,8 @@ def get_game_history(game_id: str, storefront: str | None = Query(default=None))
                 "storefront": row[1],
                 "rank": row[2],
                 "alias_title": row[3],
+                "data_source": row[4],
+                "notes": row[5],
             }
             for row in rows
         ],
