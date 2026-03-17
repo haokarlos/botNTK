@@ -38,8 +38,42 @@ def get_storefront_id(conn, storefront_slug):
     return row[0]
 
 
+def resolve_alias_url(conn, storefront_id, normalized_title, url):
+    if not url:
+        return None
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            with storefront_platform as (
+                select s.id as storefront_id, s.platform_id
+                from storefronts s
+                where s.id = %s
+            )
+            select ga.id, ga.storefront_id, ga.title_normalized
+            from game_aliases ga
+            join storefront_platform sp on sp.platform_id = ga.platform_id
+            where ga.url = %s
+            limit 1
+            """,
+            (storefront_id, url),
+        )
+        row = cur.fetchone()
+
+    if not row:
+        return url
+
+    existing_storefront_id = row[1]
+    existing_title_normalized = row[2]
+    if existing_storefront_id == storefront_id and existing_title_normalized == normalized_title:
+        return url
+
+    return None
+
+
 def upsert_game_alias(conn, storefront_id, title, url=None):
     normalized_title = normalize_title(title)
+    safe_url = resolve_alias_url(conn, storefront_id, normalized_title, url)
 
     with conn.cursor() as cur:
         cur.execute(
@@ -105,7 +139,7 @@ def upsert_game_alias(conn, storefront_id, title, url=None):
                 title,
                 normalized_title,
                 normalized_title,
-                url,
+                safe_url,
                 title,
                 normalized_title,
             ),
@@ -125,7 +159,7 @@ def upsert_game_alias(conn, storefront_id, title, url=None):
               and title_normalized = %s
             returning id
             """,
-            (url, title, storefront_id, normalized_title),
+            (safe_url, title, storefront_id, normalized_title),
         )
         row = cur.fetchone()
 
