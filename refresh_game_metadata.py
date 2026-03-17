@@ -231,7 +231,7 @@ def select_aliases_to_refresh(conn, limit, refresh_days):
             from game_aliases ga
             join storefronts sf on sf.id = ga.storefront_id
             left join latest_metadata lm on lm.game_alias_id = ga.id
-            where sf.slug like 'nutaku-%'
+            where sf.slug like 'nutaku-%%'
               and ga.url is not null
               and (
                   lm.last_captured_at is null
