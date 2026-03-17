@@ -141,7 +141,9 @@ def open_database_connection():
         print('No hay DATABASE_URL configurada. Se omite PostgreSQL.')
         return None
 
-    return psycopg.connect(DATABASE_URL)
+    return psycopg.connect(DATABASE_URL, options='-c statement_timeout=0')
+
+
 def main():
     sheet = open_google_sheet()
     conn = open_database_connection()
@@ -156,15 +158,17 @@ def main():
             if limit:
                 game_names = game_names[:limit]
 
+            if conn is not None:
+                try:
+                    save_snapshot_to_postgres(conn, storefront['slug'], source_url, game_names)
+                    conn.commit()
+                    print(f'Snapshot guardado en PostgreSQL para {storefront["slug"]}')
+                except Exception:
+                    conn.rollback()
+                    raise
+
             if sheet is not None:
                 write_to_google_sheets(sheet, game_names, storefront['sheet_index'])
-
-            if conn is not None:
-                save_snapshot_to_postgres(conn, storefront['slug'], source_url, game_names)
-                print(f'Snapshot guardado en PostgreSQL para {storefront["slug"]}')
-
-        if conn is not None:
-            conn.commit()
     finally:
         if conn is not None:
             conn.close()
