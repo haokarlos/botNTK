@@ -15,11 +15,22 @@ WEB_DIR = BASE_DIR / "web"
 app = FastAPI(title="BotNTK API", version="0.1.0")
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
+STOREFRONT_DISPLAY_NAMES = {
+    "nutaku-all-games": "Nutaku",
+    "erolabs-home-ranking": "EroLabs",
+    "nutaku-browser-ranking": "Nutaku PC",
+    "nutaku-mobile-ranking": "Nutaku Android",
+}
+
 
 def get_database_url():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL is required to run the API.")
     return DATABASE_URL
+
+
+def display_storefront_name(slug: str, fallback: str | None = None) -> str:
+    return STOREFRONT_DISPLAY_NAMES.get(slug, fallback or slug)
 
 
 @contextmanager
@@ -65,7 +76,7 @@ def list_storefronts():
         "storefronts": [
             {
                 "slug": row[0],
-                "name": row[1],
+                "name": display_storefront_name(row[0], row[1]),
                 "region": row[2],
                 "device_type": row[3],
                 "platform_slug": row[4],
@@ -183,7 +194,7 @@ def get_leaderboard(
         raise HTTPException(status_code=404, detail="No leaderboard found for that storefront.")
 
     return {
-        "storefront": {"slug": rows[0][0], "name": rows[0][1]},
+        "storefront": {"slug": rows[0][0], "name": display_storefront_name(rows[0][0], rows[0][1])},
         "latest_date": str(rows[0][2]),
         "view": view,
         "entries": [
@@ -257,7 +268,7 @@ def get_current_rankings(
     storefront_name = rows[0][4]
 
     return {
-        "storefront": {"slug": storefront_slug, "name": storefront_name},
+        "storefront": {"slug": storefront_slug, "name": display_storefront_name(storefront_slug, storefront_name)},
         "capture_date": str(capture_date),
         "data_source": data_source,
         "notes": notes,
@@ -462,10 +473,92 @@ def get_game_summary(game_id: str):
 
             cur.execute(
                 """
+                with game_storefronts as (
+                    select distinct
+                        sf.id as storefront_id,
+                        sf.slug as storefront_slug,
+                        sf.name as storefront_name,
+                        case
+                            when sf.slug = 'erolabs-home-ranking' then 25
+                            else 60
+                        end as penalty_rank
+                    from game_aliases ga
+                    join storefronts sf on sf.id = ga.storefront_id
+                    where ga.game_id = %s
+                ),
+                storefront_ranges as (
+                    select
+                        gs.storefront_id,
+                        gs.storefront_slug,
+                        gs.storefront_name,
+                        gs.penalty_rank,
+                        min(rs.capture_date) as first_seen_date,
+                        (
+                            select max(rs2.capture_date)
+                            from ranking_snapshots rs2
+                            where rs2.storefront_id = gs.storefront_id
+                        ) as last_snapshot_date
+                    from game_storefronts gs
+                    join game_aliases ga on ga.storefront_id = gs.storefront_id and ga.game_id = %s
+                    join ranking_entries re on re.game_alias_id = ga.id
+                    join ranking_snapshots rs on rs.id = re.snapshot_id
+                    group by gs.storefront_id, gs.storefront_slug, gs.storefront_name, gs.penalty_rank
+                ),
+                storefront_calendar as (
+                    select
+                        sr.storefront_id,
+                        sr.storefront_slug,
+                        sr.storefront_name,
+                        sr.penalty_rank,
+                        sr.first_seen_date,
+                        sr.last_snapshot_date,
+                        generate_series(sr.first_seen_date, sr.last_snapshot_date, interval '1 day')::date as metric_date
+                    from storefront_ranges sr
+                ),
+                observed_ranks as (
+                    select
+                        sf.id as storefront_id,
+                        rs.capture_date,
+                        min(re.rank) as rank
+                    from ranking_entries re
+                    join ranking_snapshots rs on rs.id = re.snapshot_id
+                    join game_aliases ga on ga.id = re.game_alias_id
+                    join storefronts sf on sf.id = rs.storefront_id
+                    where ga.game_id = %s
+                    group by sf.id, rs.capture_date
+                )
+                select
+                    sc.storefront_slug,
+                    sc.storefront_name,
+                    min(orx.rank) as best_rank,
+                    sc.first_seen_date,
+                    sc.last_snapshot_date,
+                    count(*) as tracked_days,
+                    count(orx.rank) as observed_days,
+                    avg(orx.rank)::numeric(10, 2) as observed_avg_rank,
+                    avg(coalesce(orx.rank, sc.penalty_rank))::numeric(10, 2) as adjusted_avg_rank,
+                    case
+                        when count(*) = 0 then null
+                        else round(count(orx.rank)::numeric / count(*)::numeric, 4)
+                    end as coverage_ratio
+                from storefront_calendar sc
+                left join observed_ranks orx
+                    on orx.storefront_id = sc.storefront_id
+                   and orx.capture_date = sc.metric_date
+                group by sc.storefront_slug, sc.storefront_name, sc.first_seen_date, sc.last_snapshot_date
+                order by sc.storefront_name asc
+                """,
+                (game_id, game_id, game_id),
+            )
+            storefront_metrics = cur.fetchall()
+
+            cur.execute(
+                """
                 select distinct
                     sf.slug,
                     sf.name,
-                    ga.title
+                    ga.title,
+                    ga.url
                 from game_aliases ga
                 join storefronts sf on sf.id = ga.storefront_id
                 where ga.game_id = %s
@@ -474,6 +567,75 @@ def get_game_summary(game_id: str):
                 (game_id,),
             )
             aliases = cur.fetchall()
+
+            cur.execute(
+                """
+                with alias_candidates as (
+                    select
+                        ga.url,
+                        ga.developer_raw,
+                        ga.publisher_raw,
+                        sf.slug as storefront_slug,
+                        sf.name as storefront_name,
+                        gms.image_url,
+                        gms.developer as metadata_developer,
+                        gms.publisher as metadata_publisher,
+                        gms.description
+                    from game_aliases ga
+                    left join storefronts sf on sf.id = ga.storefront_id
+                    left join lateral (
+                        select
+                            gms.image_url,
+                            gms.developer,
+                            gms.publisher,
+                            gms.description
+                        from game_metadata_snapshots gms
+                        where gms.game_alias_id = ga.id
+                        order by gms.captured_at desc
+                        limit 1
+                    ) gms on true
+                    where ga.game_id = %s
+                    order by
+                        case when ga.url is not null then 0 else 1 end,
+                        case when gms.image_url is not null then 0 else 1 end,
+                        ga.updated_at desc
+                    limit 1
+                )
+                select
+                    coalesce(g.developer, ac.metadata_developer, ac.developer_raw),
+                    coalesce(g.publisher, ac.metadata_publisher, ac.publisher_raw),
+                    ac.image_url,
+                    ac.url,
+                    ac.storefront_slug,
+                    ac.storefront_name,
+                    ac.description
+                from games g
+                left join alias_candidates ac on true
+                where g.id = %s
+                """,
+                (game_id, game_id),
+            )
+            metadata_row = cur.fetchone()
+
+    storefront_metric_payload = [
+        {
+            "storefront_slug": row[0],
+            "storefront_name": display_storefront_name(row[0], row[1]),
+            "best_rank": row[2],
+            "first_seen_date": str(row[3]) if row[3] else None,
+            "last_seen_date": str(row[4]) if row[4] else None,
+            "tracked_days": row[5],
+            "observed_days": row[6],
+            "observed_avg_rank": float(row[7]) if row[7] is not None else None,
+            "adjusted_avg_rank": float(row[8]) if row[8] is not None else None,
+            "coverage_ratio": float(row[9]) if row[9] is not None else None,
+        }
+        for row in storefront_metrics
+    ]
+    default_storefront = (
+        next((row for row in storefront_metric_payload if row["storefront_slug"] == "nutaku-all-games"), None)
+        or max(storefront_metric_payload, key=lambda row: row["tracked_days"], default=None)
+    )
 
     return {
         "game_id": str(game_row[0]),
@@ -487,8 +649,23 @@ def get_game_summary(game_id: str):
         "observed_days": overall_metrics[0] if overall_metrics else 0,
         "tracked_days": overall_metrics[1] if overall_metrics else 0,
         "coverage_ratio": float(overall_metrics[2]) if overall_metrics and overall_metrics[2] is not None else None,
+        "developer": metadata_row[0] if metadata_row else None,
+        "publisher": metadata_row[1] if metadata_row else None,
+        "image_url": metadata_row[2] if metadata_row else None,
+        "game_url": metadata_row[3] if metadata_row else None,
+        "metadata_storefront_slug": metadata_row[4] if metadata_row else None,
+        "metadata_storefront_name": display_storefront_name(metadata_row[4], metadata_row[5]) if metadata_row else None,
+        "description": metadata_row[6] if metadata_row else None,
+        "default_storefront_slug": default_storefront["storefront_slug"] if default_storefront else None,
+        "default_storefront_name": default_storefront["storefront_name"] if default_storefront else None,
+        "storefront_metrics": storefront_metric_payload,
         "aliases": [
-            {"storefront_slug": row[0], "storefront_name": row[1], "alias_title": row[2]}
+            {
+                "storefront_slug": row[0],
+                "storefront_name": display_storefront_name(row[0], row[1]),
+                "alias_title": row[2],
+                "url": row[3],
+            }
             for row in aliases
         ],
     }
@@ -517,6 +694,7 @@ def get_game_history(game_id: str, storefront: str | None = Query(default=None))
                     select
                         rs.capture_date,
                         sf.slug,
+                        sf.name,
                         re.rank,
                         ga.title,
                         rs.data_source,
@@ -537,6 +715,7 @@ def get_game_history(game_id: str, storefront: str | None = Query(default=None))
                     select
                         rs.capture_date,
                         sf.slug,
+                        sf.name,
                         re.rank,
                         ga.title,
                         rs.data_source,
@@ -559,10 +738,11 @@ def get_game_history(game_id: str, storefront: str | None = Query(default=None))
             {
                 "capture_date": str(row[0]),
                 "storefront": row[1],
-                "rank": row[2],
-                "alias_title": row[3],
-                "data_source": row[4],
-                "notes": row[5],
+                "storefront_name": display_storefront_name(row[1], row[2]),
+                "rank": row[3],
+                "alias_title": row[4],
+                "data_source": row[5],
+                "notes": row[6],
             }
             for row in rows
         ],

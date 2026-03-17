@@ -89,14 +89,23 @@ function renderHistoryChart(container, history) {
     .join(" ");
 
   container.innerHTML = `
+    <div class="chart-tooltip" id="chart-tooltip" hidden></div>
     <svg class="chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-label="Rank history chart">
       <text class="chart-axis" x="${padding}" y="16">Rank ${minRank}</text>
       <text class="chart-axis" x="${padding}" y="${height - 8}">Rank ${maxRank}</text>
       <path class="chart-line" d="${path}"></path>
       ${points
         .map(
-          (point) => `
+          (point, index) => `
             <circle class="chart-point chart-point--${point.data_source}" cx="${point.x}" cy="${point.y}" r="4"></circle>
+            <circle
+              class="chart-hit"
+              data-index="${index}"
+              cx="${point.x}"
+              cy="${point.y}"
+              r="12"
+              fill="transparent"
+            ></circle>
           `
         )
         .join("")}
@@ -110,6 +119,41 @@ function renderHistoryChart(container, history) {
         .join("")}
     </svg>
   `;
+
+  const tooltip = container.querySelector("#chart-tooltip");
+  const svg = container.querySelector(".chart-svg");
+  const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+  function placeTooltip(point, event) {
+    const rect = svg.getBoundingClientRect();
+    const relativeX = event ? event.clientX - rect.left : (point.x / width) * rect.width;
+    const relativeY = event ? event.clientY - rect.top : (point.y / height) * rect.height;
+    const left = clamp(relativeX, 84, rect.width - 84);
+    const top = clamp(relativeY - 18, 22, rect.height - 18);
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  }
+
+  container.querySelectorAll(".chart-hit").forEach((node) => {
+    node.addEventListener("mouseenter", (event) => {
+      const point = points[Number(node.dataset.index)];
+      tooltip.hidden = false;
+      tooltip.innerHTML = `
+        <span>${formatDate(point.capture_date)}</span>
+        <strong>Rank #${point.rank}</strong>
+        <span>${point.storefront_name || point.storefront}</span>
+        <span>${formatDataSource(point.data_source)}</span>
+      `;
+      placeTooltip(point, event);
+    });
+    node.addEventListener("mousemove", (event) => {
+      const point = points[Number(node.dataset.index)];
+      placeTooltip(point, event);
+    });
+    node.addEventListener("mouseleave", () => {
+      tooltip.hidden = true;
+    });
+  });
 }
 
 async function initHome() {
@@ -264,12 +308,21 @@ async function initGame() {
   const gameId = getQueryParam("id");
   const gameTitle = document.querySelector("#game-title");
   const gameSummary = document.querySelector("#game-summary");
+  const gamePoster = document.querySelector("#game-poster");
+  const gameDescription = document.querySelector("#game-description");
+  const developerLabel = document.querySelector("#developer-label");
+  const publisherLabel = document.querySelector("#publisher-label");
+  const defaultStorefrontLabel = document.querySelector("#default-storefront-label");
+  const gameLink = document.querySelector("#game-link");
+  const gameLinkGrid = document.querySelector("#game-link-grid");
+  const storefrontSelect = document.querySelector("#game-storefront-select");
   const bestRankLabel = document.querySelector("#best-rank-label");
   const observedAvgRankLabel = document.querySelector("#observed-avg-rank-label");
   const adjustedAvgRankLabel = document.querySelector("#adjusted-avg-rank-label");
   const firstSeenLabel = document.querySelector("#first-seen-label");
   const coverageLabel = document.querySelector("#coverage-label");
   const lastSeenLabel = document.querySelector("#last-seen-label");
+  const historySummaryLabel = document.querySelector("#history-summary-label");
   const aliasesList = document.querySelector("#aliases-list");
   const historyChart = document.querySelector("#history-chart");
   const historyTable = document.querySelector("#history-table");
@@ -295,6 +348,40 @@ async function initGame() {
   const sourceSummary = Object.entries(sourceCounts)
     .map(([source, count]) => `${count} ${formatDataSource(source).toLowerCase()}`)
     .join(" · ");
+  if (gamePoster) {
+    if (summary.image_url) {
+      gamePoster.innerHTML = `<img src="${summary.image_url}" alt="${summary.canonical_name}" />`;
+    } else {
+      gamePoster.textContent = summary.canonical_name
+        .split(" ")
+        .slice(0, 2)
+        .map((part) => part[0] || "")
+        .join("")
+        .toUpperCase();
+    }
+  }
+  if (developerLabel) developerLabel.textContent = summary.developer || "-";
+  if (publisherLabel) publisherLabel.textContent = summary.publisher || "-";
+  if (defaultStorefrontLabel) defaultStorefrontLabel.textContent = summary.default_storefront_name || "-";
+  if (gameDescription) {
+    if (summary.description) {
+      gameDescription.hidden = false;
+      gameDescription.textContent = summary.description;
+    } else {
+      gameDescription.hidden = true;
+    }
+  }
+  if (gameLink) {
+    if (summary.game_url) {
+      gameLink.href = summary.game_url;
+      gameLink.textContent = `Open ${summary.metadata_storefront_name || "game"} page`;
+      gameLink.removeAttribute("aria-disabled");
+    } else {
+      gameLink.removeAttribute("href");
+      gameLink.setAttribute("aria-disabled", "true");
+      gameLink.textContent = "No game page available";
+    }
+  }
   if (bestRankLabel) bestRankLabel.textContent = summary.best_rank ?? "-";
   if (observedAvgRankLabel) observedAvgRankLabel.textContent = formatNumber(summary.observed_avg_rank_overall);
   if (adjustedAvgRankLabel) adjustedAvgRankLabel.textContent = formatNumber(summary.adjusted_avg_rank_overall);
@@ -302,13 +389,36 @@ async function initGame() {
   if (coverageLabel) coverageLabel.textContent = formatPercent(summary.coverage_ratio);
   if (lastSeenLabel) lastSeenLabel.textContent = formatDate(summary.last_seen_date);
 
+  if (gameLinkGrid) {
+    const aliasesWithLinks = summary.aliases.filter((alias) => alias.url);
+    gameLinkGrid.innerHTML = aliasesWithLinks.length
+      ? aliasesWithLinks
+          .map(
+            (alias) => `
+              <a class="storefront-link" href="${alias.url}" target="_blank" rel="noreferrer">
+                <span class="storefront-link__label">${alias.storefront_name}</span>
+                <strong>${alias.alias_title}</strong>
+              </a>
+            `
+          )
+          .join("")
+      : "";
+  }
+
   aliasesList.innerHTML = summary.aliases.length
     ? summary.aliases
         .map(
           (alias) => `
             <article class="alias-item">
-              <strong>${alias.alias_title}</strong>
-              <span>${alias.storefront_name}</span>
+              <div>
+                <strong>${alias.alias_title}</strong>
+                <span>${alias.storefront_name}</span>
+              </div>
+              ${
+                alias.url
+                  ? `<a class="ranking-link" href="${alias.url}" target="_blank" rel="noreferrer">Open page</a>`
+                  : `<span class="alias-item__muted">No link</span>`
+              }
             </article>
           `
         )
@@ -316,16 +426,84 @@ async function initGame() {
     : `<div class="empty-state">No aliases recorded.</div>`;
 
   let selectedRange = "all";
+  const storefrontOptions = summary.aliases.reduce((acc, alias) => {
+    if (!acc.some((entry) => entry.slug === alias.storefront_slug)) {
+      acc.push({ slug: alias.storefront_slug, name: alias.storefront_name });
+    }
+    return acc;
+  }, []);
+  const defaultStorefront =
+    storefrontOptions.find((option) => option.slug === "nutaku-all-games")?.slug ||
+    summary.default_storefront_slug ||
+    storefrontOptions[0]?.slug ||
+    "";
+  let selectedStorefront = defaultStorefront;
+
+  if (storefrontSelect) {
+    storefrontSelect.innerHTML = storefrontOptions
+      .map(
+        (option) => `
+          <option value="${option.slug}" ${option.slug === defaultStorefront ? "selected" : ""}>${option.name}</option>
+        `
+      )
+      .join("");
+  }
+
+  function renderStorefrontMetrics(storefrontSlug) {
+    const metrics = summary.storefront_metrics?.find((entry) => entry.storefront_slug === storefrontSlug);
+    if (!metrics) {
+      if (bestRankLabel) bestRankLabel.textContent = summary.best_rank ?? "-";
+      if (observedAvgRankLabel) observedAvgRankLabel.textContent = formatNumber(summary.observed_avg_rank_overall);
+      if (adjustedAvgRankLabel) adjustedAvgRankLabel.textContent = formatNumber(summary.adjusted_avg_rank_overall);
+      if (firstSeenLabel) firstSeenLabel.textContent = formatDate(summary.first_seen_date);
+      if (coverageLabel) coverageLabel.textContent = formatPercent(summary.coverage_ratio);
+      if (lastSeenLabel) lastSeenLabel.textContent = formatDate(summary.last_seen_date);
+      return;
+    }
+
+    if (bestRankLabel) bestRankLabel.textContent = metrics.best_rank ?? "-";
+    if (observedAvgRankLabel) observedAvgRankLabel.textContent = formatNumber(metrics.observed_avg_rank);
+    if (adjustedAvgRankLabel) adjustedAvgRankLabel.textContent = formatNumber(metrics.adjusted_avg_rank);
+    if (firstSeenLabel) firstSeenLabel.textContent = formatDate(metrics.first_seen_date);
+    if (coverageLabel) coverageLabel.textContent = formatPercent(metrics.coverage_ratio);
+    if (lastSeenLabel) lastSeenLabel.textContent = formatDate(metrics.last_seen_date);
+  }
 
   function renderGameState() {
-    const filteredHistory = filterHistory(history.history, {
+    const storefrontHistory = selectedStorefront
+      ? history.history.filter((entry) => entry.storefront === selectedStorefront)
+      : history.history;
+    const filteredHistory = filterHistory(storefrontHistory, {
       hideImputed: hideImputedToggle.checked,
       range: selectedRange,
     });
     const windowAverage = computeWindowAverage(filteredHistory);
+    const selectedStorefrontName =
+      storefrontOptions.find((option) => option.slug === selectedStorefront)?.name || "Selected storefront";
+    const selectedStorefrontAlias = summary.aliases.find((alias) => alias.storefront_slug === selectedStorefront && alias.url);
+    if (historySummaryLabel) {
+      historySummaryLabel.textContent = `${selectedStorefrontName} · ${filteredHistory.length} visible points · lower rank is better`;
+    }
+    renderStorefrontMetrics(selectedStorefront);
+    if (defaultStorefrontLabel) defaultStorefrontLabel.textContent = selectedStorefrontName;
+    if (gameLink) {
+      if (selectedStorefrontAlias?.url) {
+        gameLink.href = selectedStorefrontAlias.url;
+        gameLink.textContent = `Open ${selectedStorefrontName} page`;
+        gameLink.removeAttribute("aria-disabled");
+      } else if (summary.game_url) {
+        gameLink.href = summary.game_url;
+        gameLink.textContent = `Open ${summary.metadata_storefront_name || "game"} page`;
+        gameLink.removeAttribute("aria-disabled");
+      } else {
+        gameLink.removeAttribute("href");
+        gameLink.setAttribute("aria-disabled", "true");
+        gameLink.textContent = "No game page available";
+      }
+    }
     gameSummary.textContent = `${summary.ranking_points} ranking points collected across all tracked storefronts. ${sourceSummary}. Observed window avg rank: ${formatNumber(
       windowAverage
-    )}.`;
+    )} on ${selectedStorefrontName}.`;
 
     renderHistoryChart(historyChart, filteredHistory);
 
@@ -351,7 +529,7 @@ async function initGame() {
               (entry) => `
                 <tr>
                   <td>${formatDate(entry.capture_date)}</td>
-                  <td>${entry.storefront}</td>
+                  <td>${entry.storefront_name}</td>
                   <td>${entry.rank}</td>
                   <td><span class="${badgeClass(entry.data_source)}">${formatDataSource(entry.data_source)}</span></td>
                   <td>${entry.alias_title}</td>
@@ -375,6 +553,12 @@ async function initGame() {
         button.classList.add("is-active");
         renderGameState();
       });
+    });
+  }
+  if (storefrontSelect) {
+    storefrontSelect.addEventListener("change", () => {
+      selectedStorefront = storefrontSelect.value;
+      renderGameState();
     });
   }
 

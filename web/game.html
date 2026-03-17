@@ -10,12 +10,34 @@
     <div class="page-shell">
       <header class="hero hero--compact">
         <div class="hero__eyebrow"><a href="/" class="back-link">Back to dashboard</a></div>
-        <div class="hero__grid">
-          <section>
+        <div class="game-hero">
+          <div class="game-hero__poster">
+            <div class="game-poster" id="game-poster">No image</div>
+          </div>
+          <section class="game-hero__content">
             <h1 id="game-title">Loading game...</h1>
             <p class="hero__copy" id="game-summary">Fetching ranking history and storefront aliases.</p>
+            <div class="game-description" id="game-description" hidden></div>
+            <div class="game-meta-strip">
+              <div class="game-meta-chip">
+                <span>Developer</span>
+                <strong id="developer-label">-</strong>
+              </div>
+              <div class="game-meta-chip">
+                <span>Publisher</span>
+                <strong id="publisher-label">-</strong>
+              </div>
+              <div class="game-meta-chip">
+                <span>Default storefront</span>
+                <strong id="default-storefront-label">-</strong>
+              </div>
+            </div>
+            <div class="game-actions">
+              <a class="button-link" id="game-link" href="#" target="_blank" rel="noreferrer">Open game page</a>
+            </div>
+            <div class="game-link-grid" id="game-link-grid"></div>
           </section>
-          <aside class="hero__panel">
+          <aside class="hero__panel hero__panel--game">
             <div class="metric-card">
               <span class="metric-card__label">Best rank</span>
               <strong id="best-rank-label">-</strong>
@@ -47,10 +69,16 @@
       <main class="layout">
         <section class="panel">
           <div class="panel__header">
-            <h2>Rank history</h2>
-            <span class="panel__subtle">Lower rank is better</span>
+            <div>
+              <h2>Rank history</h2>
+              <span class="panel__subtle" id="history-summary-label">Lower rank is better</span>
+            </div>
           </div>
           <div class="toolbar">
+            <div class="field field--compact">
+              <label for="game-storefront-select">Storefront</label>
+              <select id="game-storefront-select"></select>
+            </div>
             <div class="segmented" id="range-selector">
               <button type="button" data-range="7">7D</button>
               <button type="button" data-range="30">30D</button>
@@ -62,13 +90,13 @@
               <span>Hide imputed rows</span>
             </label>
           </div>
-          <div id="history-chart" class="chart-card"></div>
+          <div id="history-chart" class="chart-card chart-card--interactive"></div>
         </section>
 
         <section class="panel">
           <div class="panel__header">
             <h2>Storefront aliases</h2>
-            <span class="panel__subtle">How this game appears across the dataset</span>
+            <span class="panel__subtle">Titles and direct links across the dataset</span>
           </div>
           <div id="aliases-list" class="alias-list"></div>
         </section>
