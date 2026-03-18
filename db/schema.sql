@@ -179,6 +179,96 @@ create table if not exists derived_game_metrics_daily (
 create index if not exists derived_game_metrics_daily_metric_date_idx
     on derived_game_metrics_daily (metric_date desc);
 
+create table if not exists internal_game_actuals_daily (
+    id uuid primary key default gen_random_uuid(),
+    game_id uuid not null references games(id) on delete cascade,
+    storefront_id uuid references storefronts(id) on delete set null,
+    metric_date date not null,
+    source text not null default 'gameyond',
+    raw_game_name text not null,
+    downloads integer not null default 0,
+    dau integer not null default 0,
+    gold_spent integer not null default 0,
+    revenue_usd numeric(14, 2) not null default 0,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    constraint internal_game_actuals_daily_unique unique (game_id, storefront_id, metric_date, source)
+);
+
+create index if not exists internal_game_actuals_daily_metric_date_idx
+    on internal_game_actuals_daily (metric_date desc);
+
+create index if not exists internal_game_actuals_daily_game_idx
+    on internal_game_actuals_daily (game_id, metric_date desc);
+
+create table if not exists internal_rank_calibration_daily (
+    id uuid primary key default gen_random_uuid(),
+    game_id uuid not null references games(id) on delete cascade,
+    metric_date date not null,
+    actual_storefront_id uuid references storefronts(id) on delete set null,
+    actual_storefront_slug text,
+    actual_storefront_name text,
+    raw_game_name text not null,
+    downloads integer not null default 0,
+    dau integer not null default 0,
+    gold_spent integer not null default 0,
+    revenue_usd numeric(14, 2) not null default 0,
+    nutaku_all_rank integer,
+    nutaku_browser_rank integer,
+    nutaku_mobile_rank integer,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    constraint internal_rank_calibration_daily_unique unique (game_id, metric_date)
+);
+
+create index if not exists internal_rank_calibration_daily_metric_date_idx
+    on internal_rank_calibration_daily (metric_date desc);
+
+create index if not exists internal_rank_calibration_daily_game_idx
+    on internal_rank_calibration_daily (game_id, metric_date desc);
+
+create table if not exists nutaku_rank_estimation_models (
+    id uuid primary key default gen_random_uuid(),
+    model_version text not null unique,
+    target_metric text not null,
+    storefront_slug text not null,
+    sample_size integer not null,
+    intercept numeric(18, 10) not null,
+    slope numeric(18, 10) not null,
+    residual_stddev numeric(18, 10),
+    trained_at timestamptz not null default now(),
+    notes text
+);
+
+create index if not exists nutaku_rank_estimation_models_metric_idx
+    on nutaku_rank_estimation_models (target_metric, storefront_slug, trained_at desc);
+
+create table if not exists nutaku_rank_estimates_daily (
+    id uuid primary key default gen_random_uuid(),
+    game_id uuid not null references games(id) on delete cascade,
+    storefront_id uuid not null references storefronts(id) on delete cascade,
+    metric_date date not null,
+    rank integer not null,
+    model_version text not null,
+    estimated_revenue_low numeric(14, 2),
+    estimated_revenue_mid numeric(14, 2),
+    estimated_revenue_high numeric(14, 2),
+    estimated_downloads_low integer,
+    estimated_downloads_mid integer,
+    estimated_downloads_high integer,
+    confidence text not null default 'low',
+    training_sample_size integer not null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    constraint nutaku_rank_estimates_daily_unique unique (game_id, storefront_id, metric_date, model_version)
+);
+
+create index if not exists nutaku_rank_estimates_daily_metric_date_idx
+    on nutaku_rank_estimates_daily (metric_date desc);
+
+create index if not exists nutaku_rank_estimates_daily_game_idx
+    on nutaku_rank_estimates_daily (game_id, storefront_id, metric_date desc);
+
 insert into platforms (slug, name)
 values
     ('nutaku', 'Nutaku'),

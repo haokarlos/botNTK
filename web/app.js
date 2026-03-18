@@ -30,6 +30,34 @@ function formatPercent(value) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function formatCurrencyRange(low, mid, high) {
+  if ([low, mid, high].every((value) => value === null || value === undefined || Number.isNaN(value))) return "-";
+  const formatter = new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
+  if (low !== null && low !== undefined && high !== null && high !== undefined) {
+    return `${formatter.format(low)} - ${formatter.format(high)}`;
+  }
+  if (mid !== null && mid !== undefined) {
+    return formatter.format(mid);
+  }
+  return "-";
+}
+
+function formatIntegerRange(low, mid, high) {
+  if ([low, mid, high].every((value) => value === null || value === undefined || Number.isNaN(value))) return "-";
+  const formatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
+  if (low !== null && low !== undefined && high !== null && high !== undefined) {
+    return `${formatter.format(low)} - ${formatter.format(high)}`;
+  }
+  if (mid !== null && mid !== undefined) {
+    return formatter.format(mid);
+  }
+  return "-";
+}
+
 function formatDataSource(value) {
   const mapping = {
     observed: "Observed",
@@ -331,6 +359,12 @@ async function initGame() {
   const firstSeenLabel = document.querySelector("#first-seen-label");
   const coverageLabel = document.querySelector("#coverage-label");
   const lastSeenLabel = document.querySelector("#last-seen-label");
+  const estimatedRevenueCard = document.querySelector("#estimated-revenue-card");
+  const estimatedRevenueLabel = document.querySelector("#estimated-revenue-label");
+  const estimatedRevenueMeta = document.querySelector("#estimated-revenue-meta");
+  const estimatedDownloadsCard = document.querySelector("#estimated-downloads-card");
+  const estimatedDownloadsLabel = document.querySelector("#estimated-downloads-label");
+  const estimatedDownloadsMeta = document.querySelector("#estimated-downloads-meta");
   const historySummaryLabel = document.querySelector("#history-summary-label");
   const aliasesList = document.querySelector("#aliases-list");
   const historyChart = document.querySelector("#history-chart");
@@ -535,6 +569,47 @@ async function initGame() {
     }
   }
 
+  function renderNutakuEstimate(storefrontSlug) {
+    const estimate = summary.nutaku_estimate;
+    const shouldShow = storefrontSlug === "nutaku-all-games" && estimate;
+
+    if (estimatedRevenueCard) estimatedRevenueCard.hidden = !shouldShow;
+    if (estimatedDownloadsCard) estimatedDownloadsCard.hidden = !shouldShow;
+
+    if (!shouldShow) {
+      return;
+    }
+
+    if (estimatedRevenueLabel) {
+      estimatedRevenueLabel.textContent = formatCurrencyRange(
+        estimate.estimated_revenue_low,
+        estimate.estimated_revenue_mid,
+        estimate.estimated_revenue_high
+      );
+    }
+    if (estimatedRevenueMeta) {
+      estimatedRevenueMeta.textContent = `Mid ${formatCurrencyRange(
+        null,
+        estimate.estimated_revenue_mid,
+        null
+      )} · ${estimate.confidence} confidence`;
+    }
+    if (estimatedDownloadsLabel) {
+      estimatedDownloadsLabel.textContent = formatIntegerRange(
+        estimate.estimated_downloads_low,
+        estimate.estimated_downloads_mid,
+        estimate.estimated_downloads_high
+      );
+    }
+    if (estimatedDownloadsMeta) {
+      estimatedDownloadsMeta.textContent = `Mid ${formatIntegerRange(
+        null,
+        estimate.estimated_downloads_mid,
+        null
+      )} · ${formatDate(estimate.metric_date)}`;
+    }
+  }
+
   function renderGameState() {
     const storefrontHistory = selectedStorefront
       ? history.history.filter((entry) => entry.storefront === selectedStorefront)
@@ -570,6 +645,7 @@ async function initGame() {
     }
     renderStorefrontMetrics(selectedStorefront);
     renderStorefrontMetadata(selectedStorefront);
+    renderNutakuEstimate(selectedStorefront);
     if (defaultStorefrontLabel) defaultStorefrontLabel.textContent = selectedStorefrontName;
     if (gameLink) {
       if (selectedMetadata?.url) {

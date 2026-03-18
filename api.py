@@ -660,6 +660,37 @@ def get_game_summary(game_id: str):
             )
             storefront_metadata_rows = cur.fetchall()
 
+            cur.execute(
+                """
+                with target_storefront as (
+                    select id, slug, name
+                    from storefronts
+                    where slug = 'nutaku-all-games'
+                )
+                select
+                    ned.metric_date,
+                    ts.slug,
+                    ts.name,
+                    ned.rank,
+                    ned.model_version,
+                    ned.estimated_revenue_low,
+                    ned.estimated_revenue_mid,
+                    ned.estimated_revenue_high,
+                    ned.estimated_downloads_low,
+                    ned.estimated_downloads_mid,
+                    ned.estimated_downloads_high,
+                    ned.confidence,
+                    ned.training_sample_size
+                from nutaku_rank_estimates_daily ned
+                join target_storefront ts on ts.id = ned.storefront_id
+                where ned.game_id = %s
+                order by ned.metric_date desc, ned.updated_at desc
+                limit 1
+                """,
+                (game_id,),
+            )
+            nutaku_estimate_row = cur.fetchone()
+
     storefront_metric_payload = [
         {
             "storefront_slug": row[0],
@@ -718,6 +749,25 @@ def get_game_summary(game_id: str):
         "default_storefront_name": default_storefront["storefront_name"] if default_storefront else None,
         "storefront_metrics": storefront_metric_payload,
         "storefront_metadata": storefront_metadata_payload,
+        "nutaku_estimate": (
+            {
+                "metric_date": str(nutaku_estimate_row[0]) if nutaku_estimate_row[0] else None,
+                "storefront_slug": nutaku_estimate_row[1],
+                "storefront_name": display_storefront_name(nutaku_estimate_row[1], nutaku_estimate_row[2]),
+                "rank": nutaku_estimate_row[3],
+                "model_version": nutaku_estimate_row[4],
+                "estimated_revenue_low": float(nutaku_estimate_row[5]) if nutaku_estimate_row[5] is not None else None,
+                "estimated_revenue_mid": float(nutaku_estimate_row[6]) if nutaku_estimate_row[6] is not None else None,
+                "estimated_revenue_high": float(nutaku_estimate_row[7]) if nutaku_estimate_row[7] is not None else None,
+                "estimated_downloads_low": nutaku_estimate_row[8],
+                "estimated_downloads_mid": nutaku_estimate_row[9],
+                "estimated_downloads_high": nutaku_estimate_row[10],
+                "confidence": nutaku_estimate_row[11],
+                "training_sample_size": nutaku_estimate_row[12],
+            }
+            if nutaku_estimate_row
+            else None
+        ),
         "aliases": [
             {
                 "storefront_slug": row[0],

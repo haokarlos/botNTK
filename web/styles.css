@@ -227,6 +227,18 @@ a {
   font-size: 1.2rem;
 }
 
+.metric-card__meta {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.metric-card--estimate {
+  background: linear-gradient(145deg, rgba(191, 79, 52, 0.08), rgba(255, 255, 255, 0.75));
+}
+
 .metric-card__label,
 .panel__subtle {
   color: var(--muted);
