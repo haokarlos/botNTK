@@ -239,6 +239,55 @@ a {
   background: linear-gradient(145deg, rgba(191, 79, 52, 0.08), rgba(255, 255, 255, 0.75));
 }
 
+.estimate-rollup-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.estimate-rollup-card {
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.estimate-rollup-card h3 {
+  margin: 0 0 14px;
+  font-family: "Iowan Old Style", "Palatino Linotype", serif;
+  font-size: 1.6rem;
+}
+
+.estimate-rollup-list {
+  display: grid;
+  gap: 10px;
+}
+
+.estimate-rollup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.estimate-rollup-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.estimate-rollup-row span {
+  color: var(--muted);
+  font-size: 0.92rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.estimate-rollup-row strong {
+  font-size: 1rem;
+}
+
 .metric-card__label,
 .panel__subtle {
   color: var(--muted);

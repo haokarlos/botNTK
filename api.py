@@ -33,6 +33,10 @@ def display_storefront_name(slug: str, fallback: str | None = None) -> str:
     return STOREFRONT_DISPLAY_NAMES.get(slug, fallback or slug)
 
 
+def maybe_float(value):
+    return float(value) if value is not None else None
+
+
 @contextmanager
 def get_conn():
     conn = psycopg.connect(get_database_url())
@@ -691,6 +695,58 @@ def get_game_summary(game_id: str):
             )
             nutaku_estimate_row = cur.fetchone()
 
+            cur.execute(
+                """
+                with target_storefront as (
+                    select id, slug, name
+                    from storefronts
+                    where slug = 'nutaku-all-games'
+                )
+                select
+                    ner.as_of_date,
+                    ts.slug,
+                    ts.name,
+                    ner.model_version,
+                    ner.revenue_1d_low,
+                    ner.revenue_1d_mid,
+                    ner.revenue_1d_high,
+                    ner.revenue_7d_low,
+                    ner.revenue_7d_mid,
+                    ner.revenue_7d_high,
+                    ner.revenue_30d_low,
+                    ner.revenue_30d_mid,
+                    ner.revenue_30d_high,
+                    ner.revenue_365d_low,
+                    ner.revenue_365d_mid,
+                    ner.revenue_365d_high,
+                    ner.revenue_total_low,
+                    ner.revenue_total_mid,
+                    ner.revenue_total_high,
+                    ner.downloads_1d_low,
+                    ner.downloads_1d_mid,
+                    ner.downloads_1d_high,
+                    ner.downloads_7d_low,
+                    ner.downloads_7d_mid,
+                    ner.downloads_7d_high,
+                    ner.downloads_30d_low,
+                    ner.downloads_30d_mid,
+                    ner.downloads_30d_high,
+                    ner.downloads_365d_low,
+                    ner.downloads_365d_mid,
+                    ner.downloads_365d_high,
+                    ner.downloads_total_low,
+                    ner.downloads_total_mid,
+                    ner.downloads_total_high
+                from nutaku_rank_estimate_rollups ner
+                join target_storefront ts on ts.id = ner.storefront_id
+                where ner.game_id = %s
+                order by ner.as_of_date desc, ner.updated_at desc
+                limit 1
+                """,
+                (game_id,),
+            )
+            nutaku_rollup_row = cur.fetchone()
+
     storefront_metric_payload = [
         {
             "storefront_slug": row[0],
@@ -766,6 +822,30 @@ def get_game_summary(game_id: str):
                 "training_sample_size": nutaku_estimate_row[12],
             }
             if nutaku_estimate_row
+            else None
+        ),
+        "nutaku_rollup": (
+            {
+                "as_of_date": str(nutaku_rollup_row[0]) if nutaku_rollup_row[0] else None,
+                "storefront_slug": nutaku_rollup_row[1],
+                "storefront_name": display_storefront_name(nutaku_rollup_row[1], nutaku_rollup_row[2]),
+                "model_version": nutaku_rollup_row[3],
+                "revenue": {
+                    "1d": {"low": maybe_float(nutaku_rollup_row[4]), "mid": maybe_float(nutaku_rollup_row[5]), "high": maybe_float(nutaku_rollup_row[6])},
+                    "7d": {"low": maybe_float(nutaku_rollup_row[7]), "mid": maybe_float(nutaku_rollup_row[8]), "high": maybe_float(nutaku_rollup_row[9])},
+                    "30d": {"low": maybe_float(nutaku_rollup_row[10]), "mid": maybe_float(nutaku_rollup_row[11]), "high": maybe_float(nutaku_rollup_row[12])},
+                    "365d": {"low": maybe_float(nutaku_rollup_row[13]), "mid": maybe_float(nutaku_rollup_row[14]), "high": maybe_float(nutaku_rollup_row[15])},
+                    "total": {"low": maybe_float(nutaku_rollup_row[16]), "mid": maybe_float(nutaku_rollup_row[17]), "high": maybe_float(nutaku_rollup_row[18])},
+                },
+                "downloads": {
+                    "1d": {"low": nutaku_rollup_row[19], "mid": nutaku_rollup_row[20], "high": nutaku_rollup_row[21]},
+                    "7d": {"low": nutaku_rollup_row[22], "mid": nutaku_rollup_row[23], "high": nutaku_rollup_row[24]},
+                    "30d": {"low": nutaku_rollup_row[25], "mid": nutaku_rollup_row[26], "high": nutaku_rollup_row[27]},
+                    "365d": {"low": nutaku_rollup_row[28], "mid": nutaku_rollup_row[29], "high": nutaku_rollup_row[30]},
+                    "total": {"low": nutaku_rollup_row[31], "mid": nutaku_rollup_row[32], "high": nutaku_rollup_row[33]},
+                },
+            }
+            if nutaku_rollup_row
             else None
         ),
         "aliases": [

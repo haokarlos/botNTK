@@ -58,6 +58,26 @@ function formatIntegerRange(low, mid, high) {
   return "-";
 }
 
+function formatShortCurrency(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
+function renderWindowRange(value, formatter) {
+  if (!value) return "-";
+  return `${formatter(value.low)} - ${formatter(value.high)}`;
+}
+
+function renderWindowMid(value, formatter) {
+  if (!value) return "-";
+  return formatter(value.mid);
+}
+
 function formatDataSource(value) {
   const mapping = {
     observed: "Observed",
@@ -366,6 +386,10 @@ async function initGame() {
   const estimatedDownloadsLabel = document.querySelector("#estimated-downloads-label");
   const estimatedDownloadsMeta = document.querySelector("#estimated-downloads-meta");
   const historySummaryLabel = document.querySelector("#history-summary-label");
+  const nutakuRollupHeader = document.querySelector("#nutaku-rollup-header");
+  const nutakuRollupGrid = document.querySelector("#nutaku-rollup-grid");
+  const nutakuRevenueRollup = document.querySelector("#nutaku-revenue-rollup");
+  const nutakuDownloadsRollup = document.querySelector("#nutaku-downloads-rollup");
   const aliasesList = document.querySelector("#aliases-list");
   const historyChart = document.querySelector("#history-chart");
   const historyTable = document.querySelector("#history-table");
@@ -610,6 +634,58 @@ async function initGame() {
     }
   }
 
+  function renderNutakuRollups(storefrontSlug) {
+    const rollup = summary.nutaku_rollup;
+    const shouldShow = storefrontSlug === "nutaku-all-games" && rollup;
+
+    if (nutakuRollupHeader) nutakuRollupHeader.hidden = !shouldShow;
+    if (nutakuRollupGrid) nutakuRollupGrid.hidden = !shouldShow;
+
+    if (!shouldShow) {
+      return;
+    }
+
+    if (nutakuRevenueRollup) {
+      nutakuRevenueRollup.innerHTML = [
+        ["1D", rollup.revenue["1d"]],
+        ["7D", rollup.revenue["7d"]],
+        ["30D", rollup.revenue["30d"]],
+        ["1Y", rollup.revenue["365d"]],
+        ["Tracked total", rollup.revenue["total"]],
+      ]
+        .map(
+          ([label, value]) => `
+            <div class="estimate-rollup-row">
+              <span>${label}</span>
+              <strong>${renderWindowRange(value, formatShortCurrency)}</strong>
+              <small>${renderWindowMid(value, formatShortCurrency)}</small>
+            </div>
+          `
+        )
+        .join("");
+    }
+
+    if (nutakuDownloadsRollup) {
+      nutakuDownloadsRollup.innerHTML = [
+        ["1D", rollup.downloads["1d"]],
+        ["7D", rollup.downloads["7d"]],
+        ["30D", rollup.downloads["30d"]],
+        ["1Y", rollup.downloads["365d"]],
+        ["Tracked total", rollup.downloads["total"]],
+      ]
+        .map(
+          ([label, value]) => `
+            <div class="estimate-rollup-row">
+              <span>${label}</span>
+              <strong>${renderWindowRange(value, formatNumber)}</strong>
+              <small>${renderWindowMid(value, formatNumber)}</small>
+            </div>
+          `
+        )
+        .join("");
+    }
+  }
+
   function renderGameState() {
     const storefrontHistory = selectedStorefront
       ? history.history.filter((entry) => entry.storefront === selectedStorefront)
@@ -646,6 +722,7 @@ async function initGame() {
     renderStorefrontMetrics(selectedStorefront);
     renderStorefrontMetadata(selectedStorefront);
     renderNutakuEstimate(selectedStorefront);
+    renderNutakuRollups(selectedStorefront);
     if (defaultStorefrontLabel) defaultStorefrontLabel.textContent = selectedStorefrontName;
     if (gameLink) {
       if (selectedMetadata?.url) {

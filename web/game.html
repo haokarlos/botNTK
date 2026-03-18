@@ -78,6 +78,25 @@
 
       <main class="layout">
         <section class="panel">
+          <div class="panel__header" id="nutaku-rollup-header" hidden>
+            <div>
+              <h2>Estimated Nutaku totals</h2>
+              <span class="panel__subtle" id="nutaku-rollup-subtle">Aggregated from daily rank-based estimates</span>
+            </div>
+          </div>
+          <div class="estimate-rollup-grid" id="nutaku-rollup-grid" hidden>
+            <article class="estimate-rollup-card">
+              <h3>Revenue</h3>
+              <div class="estimate-rollup-list" id="nutaku-revenue-rollup"></div>
+            </article>
+            <article class="estimate-rollup-card">
+              <h3>Downloads</h3>
+              <div class="estimate-rollup-list" id="nutaku-downloads-rollup"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel">
           <div class="panel__header">
             <div>
               <h2>Rank history</h2>

@@ -269,6 +269,50 @@ create index if not exists nutaku_rank_estimates_daily_metric_date_idx
 create index if not exists nutaku_rank_estimates_daily_game_idx
     on nutaku_rank_estimates_daily (game_id, storefront_id, metric_date desc);
 
+create table if not exists nutaku_rank_estimate_rollups (
+    id uuid primary key default gen_random_uuid(),
+    game_id uuid not null references games(id) on delete cascade,
+    storefront_id uuid not null references storefronts(id) on delete cascade,
+    as_of_date date not null,
+    model_version text not null,
+    revenue_1d_low numeric(14, 2),
+    revenue_1d_mid numeric(14, 2),
+    revenue_1d_high numeric(14, 2),
+    revenue_7d_low numeric(14, 2),
+    revenue_7d_mid numeric(14, 2),
+    revenue_7d_high numeric(14, 2),
+    revenue_30d_low numeric(14, 2),
+    revenue_30d_mid numeric(14, 2),
+    revenue_30d_high numeric(14, 2),
+    revenue_365d_low numeric(14, 2),
+    revenue_365d_mid numeric(14, 2),
+    revenue_365d_high numeric(14, 2),
+    revenue_total_low numeric(14, 2),
+    revenue_total_mid numeric(14, 2),
+    revenue_total_high numeric(14, 2),
+    downloads_1d_low integer,
+    downloads_1d_mid integer,
+    downloads_1d_high integer,
+    downloads_7d_low integer,
+    downloads_7d_mid integer,
+    downloads_7d_high integer,
+    downloads_30d_low integer,
+    downloads_30d_mid integer,
+    downloads_30d_high integer,
+    downloads_365d_low integer,
+    downloads_365d_mid integer,
+    downloads_365d_high integer,
+    downloads_total_low integer,
+    downloads_total_mid integer,
+    downloads_total_high integer,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    constraint nutaku_rank_estimate_rollups_unique unique (game_id, storefront_id, as_of_date, model_version)
+);
+
+create index if not exists nutaku_rank_estimate_rollups_game_idx
+    on nutaku_rank_estimate_rollups (game_id, storefront_id, as_of_date desc);
+
 insert into platforms (slug, name)
 values
     ('nutaku', 'Nutaku'),
