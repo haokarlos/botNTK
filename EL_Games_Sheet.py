@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 import json
 import os
 from pathlib import Path
+from urllib.parse import urljoin
 
 import gspread
 import psycopg
@@ -26,11 +27,7 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 def absolutize_url(base_url, maybe_url):
     if not maybe_url:
         return None
-    if maybe_url.startswith('http://') or maybe_url.startswith('https://'):
-        return maybe_url
-    if maybe_url.startswith('/'):
-        return f'https://www.nutaku.net{maybe_url}'
-    return f'{base_url.rstrip("/")}/{maybe_url.lstrip("/")}'
+    return urljoin(base_url, maybe_url)
 
 
 def extract_nutaku_entries(soup, base_url):
@@ -103,9 +100,7 @@ def get_ero_labs_top_game_names():
                 if parent:
                     anchor = parent.find('a', href=True)
 
-            url = anchor.get('href') if anchor else None
-            if url and url.startswith('/'):
-                url = f'https://www.ero-labs.com{url}'
+            url = absolutize_url(ero_labs_url, anchor.get('href')) if anchor else None
 
             entries.append({'title': title, 'url': url})
             seen_titles.add(title)

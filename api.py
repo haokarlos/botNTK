@@ -617,6 +617,49 @@ def get_game_summary(game_id: str):
             )
             metadata_row = cur.fetchone()
 
+            cur.execute(
+                """
+                select distinct on (sf.slug)
+                    sf.slug,
+                    sf.name,
+                    ga.title,
+                    ga.url,
+                    coalesce(gms.developer, ga.developer_raw) as developer,
+                    coalesce(gms.publisher, ga.publisher_raw) as publisher,
+                    gms.image_url,
+                    gms.description,
+                    gms.captured_at as metadata_captured_at
+                from game_aliases ga
+                join storefronts sf on sf.id = ga.storefront_id
+                left join lateral (
+                    select
+                        gms.captured_at,
+                        gms.developer,
+                        gms.publisher,
+                        gms.image_url,
+                        gms.description
+                    from game_metadata_snapshots gms
+                    where gms.game_alias_id = ga.id
+                    order by gms.captured_at desc
+                    limit 1
+                ) gms on true
+                where ga.game_id = %s
+                    order by
+                        sf.slug,
+                        case
+                            when gms.image_url is not null then 0
+                            when gms.description is not null then 1
+                            when gms.developer is not null then 2
+                            when ga.developer_raw is not null then 3
+                            else 4
+                        end,
+                        metadata_captured_at desc nulls last,
+                        ga.updated_at desc
+                """,
+                (game_id,),
+            )
+            storefront_metadata_rows = cur.fetchall()
+
     storefront_metric_payload = [
         {
             "storefront_slug": row[0],
@@ -636,6 +679,21 @@ def get_game_summary(game_id: str):
         next((row for row in storefront_metric_payload if row["storefront_slug"] == "nutaku-all-games"), None)
         or max(storefront_metric_payload, key=lambda row: row["tracked_days"], default=None)
     )
+    storefront_metadata_payload = {}
+    for row in storefront_metadata_rows:
+        slug = row[0]
+        if slug in storefront_metadata_payload:
+            continue
+        storefront_metadata_payload[slug] = {
+            "storefront_slug": slug,
+            "storefront_name": display_storefront_name(row[0], row[1]),
+            "alias_title": row[2],
+            "url": row[3],
+            "developer": row[4],
+            "publisher": row[5],
+            "image_url": row[6],
+            "description": row[7],
+        }
 
     return {
         "game_id": str(game_row[0]),
@@ -659,6 +717,7 @@ def get_game_summary(game_id: str):
         "default_storefront_slug": default_storefront["storefront_slug"] if default_storefront else None,
         "default_storefront_name": default_storefront["storefront_name"] if default_storefront else None,
         "storefront_metrics": storefront_metric_payload,
+        "storefront_metadata": storefront_metadata_payload,
         "aliases": [
             {
                 "storefront_slug": row[0],

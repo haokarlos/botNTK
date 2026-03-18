@@ -63,6 +63,13 @@ function computeWindowAverage(history) {
   return history.reduce((sum, entry) => sum + entry.rank, 0) / history.length;
 }
 
+function metadataGroupForStorefront(storefrontSlug) {
+  if (!storefrontSlug) return null;
+  if (storefrontSlug.startsWith("nutaku-")) return "nutaku";
+  if (storefrontSlug === "erolabs-home-ranking") return "erolabs";
+  return storefrontSlug;
+}
+
 function renderHistoryChart(container, history) {
   if (!history.length) {
     renderEmpty(container, "No ranking history available for this game yet.");
@@ -310,7 +317,9 @@ async function initGame() {
   const gameSummary = document.querySelector("#game-summary");
   const gamePoster = document.querySelector("#game-poster");
   const gameDescription = document.querySelector("#game-description");
+  const developerChip = document.querySelector("#developer-chip");
   const developerLabel = document.querySelector("#developer-label");
+  const publisherChip = document.querySelector("#publisher-chip");
   const publisherLabel = document.querySelector("#publisher-label");
   const defaultStorefrontLabel = document.querySelector("#default-storefront-label");
   const gameLink = document.querySelector("#game-link");
@@ -389,22 +398,6 @@ async function initGame() {
   if (coverageLabel) coverageLabel.textContent = formatPercent(summary.coverage_ratio);
   if (lastSeenLabel) lastSeenLabel.textContent = formatDate(summary.last_seen_date);
 
-  if (gameLinkGrid) {
-    const aliasesWithLinks = summary.aliases.filter((alias) => alias.url);
-    gameLinkGrid.innerHTML = aliasesWithLinks.length
-      ? aliasesWithLinks
-          .map(
-            (alias) => `
-              <a class="storefront-link" href="${alias.url}" target="_blank" rel="noreferrer">
-                <span class="storefront-link__label">${alias.storefront_name}</span>
-                <strong>${alias.alias_title}</strong>
-              </a>
-            `
-          )
-          .join("")
-      : "";
-  }
-
   aliasesList.innerHTML = summary.aliases.length
     ? summary.aliases
         .map(
@@ -439,6 +432,42 @@ async function initGame() {
     "";
   let selectedStorefront = defaultStorefront;
 
+  function metadataCompletenessScore(metadata) {
+    if (!metadata) return -1;
+    return [
+      metadata.image_url,
+      metadata.description,
+      metadata.developer,
+      metadata.publisher,
+      metadata.url,
+    ].filter(Boolean).length;
+  }
+
+  function resolveMetadataForStorefront(storefrontSlug) {
+    const group = metadataGroupForStorefront(storefrontSlug);
+    if (group === "nutaku") {
+      const preferredNutakuOrder = ["nutaku-all-games", "nutaku-browser-ranking", "nutaku-mobile-ranking"];
+      const candidates = preferredNutakuOrder
+        .map((candidate, index) => ({
+          metadata: summary.storefront_metadata?.[candidate] || null,
+          priority: index,
+        }))
+        .filter((entry) => entry.metadata);
+
+      candidates.sort((left, right) => {
+        const scoreDelta = metadataCompletenessScore(right.metadata) - metadataCompletenessScore(left.metadata);
+        if (scoreDelta !== 0) return scoreDelta;
+        return left.priority - right.priority;
+      });
+
+      return candidates[0]?.metadata || null;
+    }
+    if (group === "erolabs") {
+      return summary.storefront_metadata?.["erolabs-home-ranking"] || null;
+    }
+    return summary.storefront_metadata?.[storefrontSlug] || null;
+  }
+
   if (storefrontSelect) {
     storefrontSelect.innerHTML = storefrontOptions
       .map(
@@ -469,6 +498,43 @@ async function initGame() {
     if (lastSeenLabel) lastSeenLabel.textContent = formatDate(metrics.last_seen_date);
   }
 
+  function renderStorefrontMetadata(storefrontSlug) {
+    const metadata = resolveMetadataForStorefront(storefrontSlug);
+
+    const effectiveDeveloper = metadata?.developer || summary.developer || "-";
+    const effectivePublisher = metadata?.publisher || null;
+    const effectiveDescription = metadata?.description || summary.description || null;
+    const effectiveImageUrl = metadata?.image_url || summary.image_url || null;
+    const effectiveAliasTitle = metadata?.alias_title || summary.canonical_name;
+
+    if (gamePoster) {
+      if (effectiveImageUrl) {
+        gamePoster.innerHTML = `<img src="${effectiveImageUrl}" alt="${effectiveAliasTitle}" />`;
+      } else {
+        gamePoster.textContent = summary.canonical_name
+          .split(" ")
+          .slice(0, 2)
+          .map((part) => part[0] || "")
+          .join("")
+          .toUpperCase();
+      }
+    }
+
+    if (developerLabel) developerLabel.textContent = effectiveDeveloper;
+    if (publisherLabel) publisherLabel.textContent = effectivePublisher || "-";
+    if (publisherChip) publisherChip.hidden = !effectivePublisher;
+    if (developerChip) developerChip.hidden = false;
+
+    if (gameDescription) {
+      if (effectiveDescription) {
+        gameDescription.hidden = false;
+        gameDescription.textContent = effectiveDescription;
+      } else {
+        gameDescription.hidden = true;
+      }
+    }
+  }
+
   function renderGameState() {
     const storefrontHistory = selectedStorefront
       ? history.history.filter((entry) => entry.storefront === selectedStorefront)
@@ -480,16 +546,36 @@ async function initGame() {
     const windowAverage = computeWindowAverage(filteredHistory);
     const selectedStorefrontName =
       storefrontOptions.find((option) => option.slug === selectedStorefront)?.name || "Selected storefront";
-    const selectedStorefrontAlias = summary.aliases.find((alias) => alias.storefront_slug === selectedStorefront && alias.url);
+    const selectedMetadata = resolveMetadataForStorefront(selectedStorefront);
+    const metadataGroup = metadataGroupForStorefront(selectedStorefront);
+    if (gameLinkGrid) {
+      const alternateAliases = summary.aliases.filter(
+        (alias) => alias.url && metadataGroupForStorefront(alias.storefront_slug) !== metadataGroup
+      );
+      gameLinkGrid.innerHTML = alternateAliases.length
+        ? alternateAliases
+            .map(
+              (alias) => `
+                <a class="storefront-link" href="${alias.url}" target="_blank" rel="noreferrer">
+                  <span class="storefront-link__label">${alias.storefront_name}</span>
+                  <strong>${alias.alias_title}</strong>
+                </a>
+              `
+            )
+            .join("")
+        : "";
+    }
     if (historySummaryLabel) {
       historySummaryLabel.textContent = `${selectedStorefrontName} · ${filteredHistory.length} visible points · lower rank is better`;
     }
     renderStorefrontMetrics(selectedStorefront);
+    renderStorefrontMetadata(selectedStorefront);
     if (defaultStorefrontLabel) defaultStorefrontLabel.textContent = selectedStorefrontName;
     if (gameLink) {
-      if (selectedStorefrontAlias?.url) {
-        gameLink.href = selectedStorefrontAlias.url;
-        gameLink.textContent = `Open ${selectedStorefrontName} page`;
+      if (selectedMetadata?.url) {
+        const metadataStorefrontName = selectedMetadata.storefront_name || selectedStorefrontName;
+        gameLink.href = selectedMetadata.url;
+        gameLink.textContent = `Open ${metadataStorefrontName} page`;
         gameLink.removeAttribute("aria-disabled");
       } else if (summary.game_url) {
         gameLink.href = summary.game_url;

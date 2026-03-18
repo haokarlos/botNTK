@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 import json
 import os
 import re
+from urllib.parse import urljoin, urlparse
 
 import psycopg
 import requests
@@ -15,6 +16,12 @@ USER_AGENT = (
 )
 DEFAULT_LIMIT = int(os.getenv('METADATA_REFRESH_LIMIT', '50'))
 REFRESH_DAYS = int(os.getenv('METADATA_REFRESH_DAYS', '7'))
+STOREFRONT_BASE_URLS = {
+    'nutaku-browser-ranking': 'https://www.nutaku.net/',
+    'nutaku-mobile-ranking': 'https://www.nutaku.net/',
+    'nutaku-all-games': 'https://www.nutaku.net/',
+    'erolabs-home-ranking': 'https://www.ero-labs.com/en/',
+}
 
 
 def get_conn():
@@ -27,6 +34,18 @@ def clean_text(value):
     if not value:
         return None
     return re.sub(r'\s+', ' ', value).strip() or None
+
+
+def absolutize_storefront_url(url, storefront_slug):
+    if not url:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme and parsed.netloc:
+        return url
+    base_url = STOREFRONT_BASE_URLS.get(storefront_slug)
+    if not base_url:
+        return url
+    return urljoin(base_url, url)
 
 
 def get_meta_content(soup, *, prop=None, name=None):
@@ -212,6 +231,94 @@ def scrape_nutaku_metadata(url):
     }
 
 
+def scrape_erolabs_metadata(url):
+    response = requests.get(
+        url,
+        timeout=30,
+        headers={'User-Agent': USER_AGENT},
+    )
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, 'html.parser')
+    structured_items = parse_json_ld(soup)
+    product = find_structured_product(structured_items)
+
+    title = (
+        normalize_title(product.get('name')) if product else None
+    ) or normalize_title(get_meta_content(soup, prop='og:title')) or normalize_title(soup.title.get_text(strip=True) if soup.title else None)
+
+    description = (
+        clean_text(product.get('description')) if product else None
+    ) or get_meta_content(soup, prop='og:description') or get_meta_content(soup, name='description')
+
+    image_url = None
+    if product:
+        image = product.get('image')
+        if isinstance(image, list):
+            image_url = image[0] if image else None
+        elif isinstance(image, dict):
+            image_url = image.get('url')
+        else:
+            image_url = image
+    image_url = image_url or get_meta_content(soup, prop='og:image')
+
+    brand = product.get('brand') if product else None
+    developer = None
+    publisher = None
+    if isinstance(brand, dict):
+        developer = clean_text(brand.get('name'))
+    elif isinstance(brand, str):
+        developer = clean_text(brand)
+
+    developer = developer or find_label_value(soup, {'developer', 'developer/publisher'})
+    publisher = find_label_value(soup, {'publisher'})
+    if not publisher:
+        publisher = developer
+
+    genres = []
+    if product:
+        raw_genre = product.get('genre')
+        if isinstance(raw_genre, list):
+            genres = [clean_text(value) for value in raw_genre if clean_text(value)]
+        elif raw_genre:
+            genres = [clean_text(raw_genre)]
+
+    tags = extract_list_values(
+        soup,
+        [
+            'a[href*="/games/"]',
+            'a[href*="/tag/"]',
+        ],
+    )
+
+    return {
+        'title': title,
+        'description': description,
+        'image_url': image_url,
+        'developer': developer,
+        'publisher': publisher,
+        'genres': genres,
+        'tags': tags,
+        'raw_payload': {
+            'url': url,
+            'structured_data': product,
+            'meta': {
+                'og_title': get_meta_content(soup, prop='og:title'),
+                'og_description': get_meta_content(soup, prop='og:description'),
+                'og_image': get_meta_content(soup, prop='og:image'),
+            },
+        },
+    }
+
+
+def scrape_metadata(url, storefront_slug):
+    url = absolutize_storefront_url(url, storefront_slug)
+    hostname = urlparse(url).netloc.casefold()
+    if 'ero-labs.com' in hostname or storefront_slug == 'erolabs-home-ranking':
+        return scrape_erolabs_metadata(url)
+    return scrape_nutaku_metadata(url)
+
+
 def select_aliases_to_refresh(conn, limit, refresh_days):
     with conn.cursor() as cur:
         cur.execute(
@@ -231,7 +338,7 @@ def select_aliases_to_refresh(conn, limit, refresh_days):
             from game_aliases ga
             join storefronts sf on sf.id = ga.storefront_id
             left join latest_metadata lm on lm.game_alias_id = ga.id
-            where sf.slug like 'nutaku-%%'
+            where (sf.slug like 'nutaku-%%' or sf.slug = 'erolabs-home-ranking')
               and ga.url is not null
               and (
                   lm.last_captured_at is null
@@ -290,13 +397,25 @@ def insert_metadata_snapshot(conn, game_alias_id, metadata):
 def main():
     with get_conn() as conn:
         aliases = select_aliases_to_refresh(conn, DEFAULT_LIMIT, REFRESH_DAYS)
-        print(f'Nutaku aliases selected for metadata refresh: {len(aliases)}')
+        print(f'Aliases selected for metadata refresh: {len(aliases)}')
 
         for index, (game_alias_id, title, url, storefront_slug) in enumerate(aliases, start=1):
-            print(f'[{index}/{len(aliases)}] Refreshing {title} ({storefront_slug}) -> {url}', flush=True)
+            target_url = absolutize_storefront_url(url, storefront_slug)
+            print(f'[{index}/{len(aliases)}] Refreshing {title} ({storefront_slug}) -> {target_url}', flush=True)
             try:
-                metadata = scrape_nutaku_metadata(url)
+                metadata = scrape_metadata(target_url, storefront_slug)
                 insert_metadata_snapshot(conn, game_alias_id, metadata)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        update game_aliases
+                        set url = %s,
+                            updated_at = now()
+                        where id = %s
+                          and url is distinct from %s
+                        """,
+                        (target_url, game_alias_id, target_url),
+                    )
                 conn.commit()
                 print(
                     f'  Saved metadata: developer={metadata["developer"] or "-"}, '
