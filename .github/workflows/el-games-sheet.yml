@@ -32,3 +32,10 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_NAME: ${{ secrets.GOOGLE_SHEET_NAME }}
         run: python EL_Games_Sheet.py
+
+      - name: Refresh game metadata
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          METADATA_REFRESH_LIMIT: '50'
+          METADATA_REFRESH_DAYS: '7'
+        run: python refresh_game_metadata.py
