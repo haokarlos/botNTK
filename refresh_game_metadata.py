@@ -7,6 +7,11 @@ from urllib.parse import urljoin, urlparse
 import psycopg
 import requests
 from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
 
 DATABASE_URL = os.getenv('DATABASE_URL')
@@ -22,6 +27,18 @@ STOREFRONT_BASE_URLS = {
     'nutaku-all-games': 'https://www.nutaku.net/',
     'erolabs-home-ranking': 'https://www.ero-labs.com/en/',
 }
+EROLABS_LEAD_TAGS = {'female leads', 'male leads', 'diverse leads', 'f', 'm', 't'}
+EROLABS_PLATFORM_TAGS = {'android', 'ios', 'mac', 'windows', 'browser', 'web', 'emulator'}
+EROLABS_LANGUAGE_TAGS = {
+    'english',
+    '日本語',
+    '繁體中文',
+    '简体中文',
+    '한국어',
+    'tiếng việt',
+    'ภาษาไทย',
+    '中文',
+}
 
 
 def get_conn():
@@ -34,6 +51,32 @@ def clean_text(value):
     if not value:
         return None
     return re.sub(r'\s+', ' ', value).strip() or None
+
+
+TARGET_STOREFRONT = clean_text(os.getenv('METADATA_TARGET_STOREFRONT'))
+
+
+def normalize_taxonomy_value(value):
+    cleaned = clean_text(value)
+    if not cleaned:
+        return None
+    cleaned = re.sub(r'[\s,;:]+$', '', cleaned)
+    return cleaned or None
+
+
+def dedupe_taxonomy_values(values):
+    deduped = []
+    seen = set()
+    for value in values:
+        normalized = normalize_taxonomy_value(value)
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(normalized)
+    return deduped
 
 
 def absolutize_storefront_url(url, storefront_slug):
@@ -107,12 +150,52 @@ def extract_list_values(soup, selectors):
     seen = set()
     for selector in selectors:
         for node in soup.select(selector):
-            text = clean_text(node.get_text(' ', strip=True))
+            text = normalize_taxonomy_value(node.get_text(' ', strip=True))
             if not text or text in seen:
                 continue
             seen.add(text)
             values.append(text)
     return values
+
+
+def extract_section_button_values(soup, section_title):
+    target_title = section_title.casefold()
+    for title_node in soup.find_all(['span', 'h2', 'h3', 'strong']):
+        title_text = clean_text(title_node.get_text(' ', strip=True))
+        if not title_text or title_text.casefold() != target_title:
+            continue
+
+        section = title_node.find_parent('section')
+        if not section:
+            section = title_node.parent
+        if not section:
+            continue
+
+        button_container = section.select_one('.cnt-buttons')
+        if not button_container:
+            continue
+
+        values = dedupe_taxonomy_values(
+            node.get_text(' ', strip=True)
+            for node in button_container.select('a, button, span')
+        )
+        if values:
+            return values
+    return []
+
+
+def derive_erolabs_genres_from_tags(tags):
+    derived = []
+    for tag in tags:
+        key = tag.casefold()
+        if key in EROLABS_LEAD_TAGS:
+            continue
+        if key in EROLABS_PLATFORM_TAGS:
+            continue
+        if key in EROLABS_LANGUAGE_TAGS:
+            continue
+        derived.append(tag)
+    return dedupe_taxonomy_values(derived)
 
 
 def find_label_value(soup, labels):
@@ -187,29 +270,36 @@ def scrape_nutaku_metadata(url):
     if not publisher:
         publisher = developer
 
-    genres = []
-    if product:
-        raw_genre = product.get('genre')
-        if isinstance(raw_genre, list):
-            genres = [clean_text(value) for value in raw_genre if clean_text(value)]
-        elif raw_genre:
-            genres = [clean_text(raw_genre)]
+    genres = extract_section_button_values(soup, 'Genre')
     if not genres:
-        genres = extract_list_values(
-            soup,
-            [
-                'a[href*="/games/genre/"]',
-                'a[href*="/genre/"]',
-            ],
+        if product:
+            raw_genre = product.get('genre')
+            if isinstance(raw_genre, list):
+                genres = dedupe_taxonomy_values(raw_genre)
+            elif raw_genre:
+                genres = dedupe_taxonomy_values([raw_genre])
+    if not genres:
+        genres = dedupe_taxonomy_values(
+            genre
+            for genre in extract_list_values(
+                soup,
+                [
+                    'a[href*="/games/genre/"]',
+                    'a[href*="/genre/"]',
+                ],
+            )
+            if genre.casefold() not in {'pc games', 'mobile games'}
         )
 
-    tags = extract_list_values(
-        soup,
-        [
-            'a[href*="/games/tag/"]',
-            'a[href*="/tag/"]',
-        ],
-    )
+    tags = extract_section_button_values(soup, 'Tags')
+    if not tags:
+        tags = dedupe_taxonomy_values(extract_list_values(
+            soup,
+            [
+                'a[href*="/games/tag/"]',
+                'a[href*="/tag/"]',
+            ],
+        ))
 
     return {
         'title': title,
@@ -232,14 +322,30 @@ def scrape_nutaku_metadata(url):
 
 
 def scrape_erolabs_metadata(url):
-    response = requests.get(
-        url,
-        timeout=30,
-        headers={'User-Agent': USER_AGENT},
-    )
-    response.raise_for_status()
+    chrome_options = Options()
+    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument(f'--user-agent={USER_AGENT}')
 
-    soup = BeautifulSoup(response.text, 'html.parser')
+    driver = webdriver.Chrome(options=chrome_options)
+    try:
+        driver.get(url)
+        wait = WebDriverWait(driver, 20)
+        wait.until(
+            EC.presence_of_element_located(
+                (
+                    By.CSS_SELECTOR,
+                    '.game_basicInfo, .game_topInfo, .game__tag--gameGenre',
+                )
+            )
+        )
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+    finally:
+        driver.quit()
+
     structured_items = parse_json_ld(soup)
     product = find_structured_product(structured_items)
 
@@ -275,21 +381,25 @@ def scrape_erolabs_metadata(url):
     if not publisher:
         publisher = developer
 
-    genres = []
-    if product:
+    tags = dedupe_taxonomy_values(
+        extract_list_values(
+            soup,
+            [
+                '.game_tagBox .game__tag--gameGenre',
+                '.game__tag--gameGenre',
+                'a[href*="/games/"]',
+                'a[href*="/tag/"]',
+            ],
+        )
+    )
+
+    genres = derive_erolabs_genres_from_tags(tags)
+    if not genres and product:
         raw_genre = product.get('genre')
         if isinstance(raw_genre, list):
-            genres = [clean_text(value) for value in raw_genre if clean_text(value)]
+            genres = dedupe_taxonomy_values(raw_genre)
         elif raw_genre:
-            genres = [clean_text(raw_genre)]
-
-    tags = extract_list_values(
-        soup,
-        [
-            'a[href*="/games/"]',
-            'a[href*="/tag/"]',
-        ],
-    )
+            genres = dedupe_taxonomy_values([raw_genre])
 
     return {
         'title': title,
@@ -319,7 +429,7 @@ def scrape_metadata(url, storefront_slug):
     return scrape_nutaku_metadata(url)
 
 
-def select_aliases_to_refresh(conn, limit, refresh_days):
+def select_aliases_to_refresh(conn, limit, refresh_days, target_storefront=None):
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -339,6 +449,7 @@ def select_aliases_to_refresh(conn, limit, refresh_days):
             join storefronts sf on sf.id = ga.storefront_id
             left join latest_metadata lm on lm.game_alias_id = ga.id
             where (sf.slug like 'nutaku-%%' or sf.slug = 'erolabs-home-ranking')
+              and (%s::text is null or sf.slug = %s::text)
               and ga.url is not null
               and (
                   lm.last_captured_at is null
@@ -347,7 +458,7 @@ def select_aliases_to_refresh(conn, limit, refresh_days):
             order by lm.last_captured_at asc nulls first, ga.updated_at desc
             limit %s
             """,
-            (datetime.now(UTC) - timedelta(days=refresh_days), limit),
+            (target_storefront, target_storefront, datetime.now(UTC) - timedelta(days=refresh_days), limit),
         )
         return cur.fetchall()
 
@@ -396,7 +507,7 @@ def insert_metadata_snapshot(conn, game_alias_id, metadata):
 
 def main():
     with get_conn() as conn:
-        aliases = select_aliases_to_refresh(conn, DEFAULT_LIMIT, REFRESH_DAYS)
+        aliases = select_aliases_to_refresh(conn, DEFAULT_LIMIT, REFRESH_DAYS, TARGET_STOREFRONT)
         print(f'Aliases selected for metadata refresh: {len(aliases)}')
 
         for index, (game_alias_id, title, url, storefront_slug) in enumerate(aliases, start=1):

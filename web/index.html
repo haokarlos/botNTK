@@ -51,6 +51,25 @@
             </label>
           </div>
           <div class="field">
+            <label for="publisher-filter-input">Publisher filter</label>
+            <input id="publisher-filter-input" type="search" list="publisher-filter-options" placeholder="e.g. Nutaku Publishing" />
+            <datalist id="publisher-filter-options"></datalist>
+          </div>
+          <div class="field">
+            <label for="genre-filter-input">Genre filter</label>
+            <input id="genre-filter-input" type="search" list="genre-filter-options" placeholder="e.g. strategy, rpg, idle" />
+            <datalist id="genre-filter-options"></datalist>
+          </div>
+          <div class="field">
+            <label for="tag-filter-input">Tag filter</label>
+            <input id="tag-filter-input" type="search" list="tag-filter-options" placeholder="e.g. fantasy, harem, turn-based" />
+            <datalist id="tag-filter-options"></datalist>
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <button id="apply-home-filters" type="button">Apply filters</button>
+          </div>
+          <div class="field">
             <label for="search-input">Search games</label>
             <div class="search-row">
               <input id="search-input" type="search" placeholder="Search by game title" />

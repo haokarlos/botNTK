@@ -226,7 +226,17 @@ async function initHome() {
   const searchResults = document.querySelector("#search-results");
   const homeHideImputed = document.querySelector("#home-hide-imputed");
   const homeViewSelector = document.querySelector("#home-view-selector");
+  const publisherFilterInput = document.querySelector("#publisher-filter-input");
+  const genreFilterInput = document.querySelector("#genre-filter-input");
+  const tagFilterInput = document.querySelector("#tag-filter-input");
+  const publisherFilterOptions = document.querySelector("#publisher-filter-options");
+  const genreFilterOptions = document.querySelector("#genre-filter-options");
+  const tagFilterOptions = document.querySelector("#tag-filter-options");
+  const applyHomeFiltersButton = document.querySelector("#apply-home-filters");
   let selectedView = "current";
+  let selectedPublisherFilter = "";
+  let selectedGenreFilter = "";
+  let selectedTagFilter = "";
 
   function renderMovement(entry) {
     if (entry.is_new) {
@@ -300,11 +310,29 @@ async function initHome() {
   }
 
   async function loadCompactLeaderboards() {
+    const filterParams = new URLSearchParams({
+      storefront: "nutaku-all-games",
+      view: selectedView,
+      limit: "20",
+    });
+    if (selectedPublisherFilter) filterParams.set("publisher", selectedPublisherFilter);
+    if (selectedGenreFilter) filterParams.set("genre", selectedGenreFilter);
+    if (selectedTagFilter) filterParams.set("tag", selectedTagFilter);
+
+    const erolabsFilterParams = new URLSearchParams({
+      storefront: "erolabs-home-ranking",
+      view: selectedView,
+      limit: "20",
+    });
+    if (selectedPublisherFilter) erolabsFilterParams.set("publisher", selectedPublisherFilter);
+    if (selectedGenreFilter) erolabsFilterParams.set("genre", selectedGenreFilter);
+    if (selectedTagFilter) erolabsFilterParams.set("tag", selectedTagFilter);
+
     const [nutakuCurrent, erolabsCurrent, nutakuCompact, erolabsCompact] = await Promise.all([
       fetchJson(`/rankings/current?storefront=nutaku-all-games`),
       fetchJson(`/rankings/current?storefront=erolabs-home-ranking`),
-      fetchJson(`/leaderboards?storefront=nutaku-all-games&view=${encodeURIComponent(selectedView)}&limit=20`),
-      fetchJson(`/leaderboards?storefront=erolabs-home-ranking&view=${encodeURIComponent(selectedView)}&limit=20`),
+      fetchJson(`/leaderboards?${filterParams.toString()}`),
+      fetchJson(`/leaderboards?${erolabsFilterParams.toString()}`),
     ]);
 
     selectedStorefrontLabel.textContent = "Nutaku All + EroLabs";
@@ -324,6 +352,16 @@ async function initHome() {
         : selectedView === "avg7"
           ? "7-day average rank with movement vs previous 7-day window"
           : "30-day average rank with movement vs previous 30-day window";
+    if (selectedPublisherFilter || selectedGenreFilter || selectedTagFilter) {
+      const activeFilters = [
+        selectedPublisherFilter ? `publisher: ${selectedPublisherFilter}` : null,
+        selectedGenreFilter ? `genre: ${selectedGenreFilter}` : null,
+        selectedTagFilter ? `tag: ${selectedTagFilter}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      rankingSubtitle.textContent += ` · filtered by ${activeFilters}`;
+    }
 
     nutakuBoardSubtitle.textContent = `${formatDataSource(nutakuCurrent.data_source)} snapshot · top 20`;
     erolabsBoardSubtitle.textContent = `${formatDataSource(erolabsCurrent.data_source)} snapshot · top 20`;
@@ -342,7 +380,36 @@ async function initHome() {
     }
   }
 
+  async function loadHomeFacets() {
+    const nutakuFacets = await fetchJson(`/leaderboard-facets?storefront=nutaku-all-games`);
+    const publisherValues = nutakuFacets.publishers || [];
+    const genreValues = (nutakuFacets.genres || []).sort((a, b) => a.localeCompare(b));
+    const tagValues = (nutakuFacets.tags || []).sort((a, b) => a.localeCompare(b));
+
+    if (publisherFilterOptions) {
+      publisherFilterOptions.innerHTML = publisherValues
+        .map((value) => `<option value="${value}"></option>`)
+        .join("");
+    }
+    if (genreFilterOptions) {
+      genreFilterOptions.innerHTML = genreValues
+        .map((value) => `<option value="${value}"></option>`)
+        .join("");
+    }
+    if (tagFilterOptions) {
+      tagFilterOptions.innerHTML = tagValues
+        .map((value) => `<option value="${value}"></option>`)
+        .join("");
+    }
+  }
+
   homeHideImputed.addEventListener("change", loadCompactLeaderboards);
+  function applyHomeFilters() {
+    selectedPublisherFilter = publisherFilterInput?.value.trim() || "";
+    selectedGenreFilter = genreFilterInput?.value.trim() || "";
+    selectedTagFilter = tagFilterInput?.value.trim() || "";
+    loadCompactLeaderboards();
+  }
   homeViewSelector.querySelectorAll("button").forEach((button) => {
     button.addEventListener("click", () => {
       selectedView = button.dataset.view;
@@ -351,12 +418,20 @@ async function initHome() {
       loadCompactLeaderboards();
     });
   });
+  if (applyHomeFiltersButton) {
+    applyHomeFiltersButton.addEventListener("click", applyHomeFilters);
+  }
+  [publisherFilterInput, genreFilterInput, tagFilterInput].forEach((input) => {
+    input?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") applyHomeFilters();
+    });
+  });
   searchButton.addEventListener("click", runSearch);
   searchInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") runSearch();
   });
 
-  await loadCompactLeaderboards();
+  await Promise.all([loadCompactLeaderboards(), loadHomeFacets()]);
 }
 
 async function initGame() {
@@ -369,6 +444,8 @@ async function initGame() {
   const developerLabel = document.querySelector("#developer-label");
   const publisherChip = document.querySelector("#publisher-chip");
   const publisherLabel = document.querySelector("#publisher-label");
+  const genreChip = document.querySelector("#genre-chip");
+  const genreLabel = document.querySelector("#genre-label");
   const defaultStorefrontLabel = document.querySelector("#default-storefront-label");
   const gameLink = document.querySelector("#game-link");
   const gameLinkGrid = document.querySelector("#game-link-grid");
@@ -497,6 +574,7 @@ async function initGame() {
       metadata.description,
       metadata.developer,
       metadata.publisher,
+      metadata.genres?.length ? "genres" : null,
       metadata.url,
     ].filter(Boolean).length;
   }
@@ -561,6 +639,7 @@ async function initGame() {
 
     const effectiveDeveloper = metadata?.developer || summary.developer || "-";
     const effectivePublisher = metadata?.publisher || null;
+    const effectiveGenre = metadata?.genres?.[0] || null;
     const effectiveDescription = metadata?.description || summary.description || null;
     const effectiveImageUrl = metadata?.image_url || summary.image_url || null;
     const effectiveAliasTitle = metadata?.alias_title || summary.canonical_name;
@@ -581,6 +660,8 @@ async function initGame() {
     if (developerLabel) developerLabel.textContent = effectiveDeveloper;
     if (publisherLabel) publisherLabel.textContent = effectivePublisher || "-";
     if (publisherChip) publisherChip.hidden = !effectivePublisher;
+    if (genreLabel) genreLabel.textContent = effectiveGenre || "-";
+    if (genreChip) genreChip.hidden = !effectiveGenre;
     if (developerChip) developerChip.hidden = false;
 
     if (gameDescription) {

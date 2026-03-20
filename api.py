@@ -37,6 +37,28 @@ def maybe_float(value):
     return float(value) if value is not None else None
 
 
+def normalize_taxonomy_value(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = " ".join(value.split()).strip(" ,;:")
+    return cleaned or None
+
+
+def normalize_taxonomy_list(values):
+    deduped = []
+    seen = set()
+    for value in values or []:
+        normalized = normalize_taxonomy_value(value)
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(normalized)
+    return deduped
+
+
 @contextmanager
 def get_conn():
     conn = psycopg.connect(get_database_url())
@@ -95,8 +117,14 @@ def get_leaderboard(
     storefront: str = Query(..., description="Storefront slug"),
     view: str = Query("current", pattern="^(current|avg7|avg30)$"),
     limit: int = Query(20, ge=1, le=100),
+    publisher: str | None = Query(default=None, description="Publisher text filter"),
+    genre: str | None = Query(default=None, description="Genre text filter"),
+    tag: str | None = Query(default=None, description="Tag text filter"),
 ):
     window_days = {"current": 1, "avg7": 7, "avg30": 30}[view]
+    publisher_filter = publisher.strip() if publisher and publisher.strip() else None
+    genre_filter = genre.strip() if genre and genre.strip() else None
+    tag_filter = tag.strip() if tag and tag.strip() else None
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -135,6 +163,65 @@ def get_leaderboard(
                     where rs.capture_date between b.current_start and b.latest_date
                     group by g.id, g.canonical_name, ga.title
                 ),
+                metadata_candidates as (
+                    select distinct on (ga.game_id)
+                        ga.game_id,
+                        coalesce(gms.publisher, ga.publisher_raw) as publisher,
+                        coalesce(gms.genres, '[]'::jsonb) as genres,
+                        coalesce(gms.tags, '[]'::jsonb) as tags
+                    from current_rows cr
+                    join game_aliases ga on ga.game_id = cr.game_id
+                    join storefronts sf on sf.id = ga.storefront_id
+                    join target_storefront ts on true
+                    left join lateral (
+                        select
+                            gms.captured_at,
+                            gms.publisher,
+                            gms.genres,
+                            gms.tags
+                        from game_metadata_snapshots gms
+                        where gms.game_alias_id = ga.id
+                        order by gms.captured_at desc
+                        limit 1
+                    ) gms on true
+                    where (
+                        (ts.slug like 'nutaku-%%' and sf.slug like 'nutaku-%%')
+                        or sf.slug = ts.slug
+                    )
+                    order by
+                        ga.game_id,
+                        case when gms.publisher is not null then 0 else 1 end,
+                        case when jsonb_array_length(coalesce(gms.genres, '[]'::jsonb)) > 0 then 0 else 1 end,
+                        case when jsonb_array_length(coalesce(gms.tags, '[]'::jsonb)) > 0 then 0 else 1 end,
+                        gms.captured_at desc nulls last,
+                        ga.updated_at desc
+                ),
+                filtered_rows as (
+                    select
+                        cr.*,
+                        mc.publisher,
+                        mc.genres,
+                        mc.tags
+                    from current_rows cr
+                    left join metadata_candidates mc on mc.game_id = cr.game_id
+                    where (%s::text is null or coalesce(mc.publisher, '') ilike '%%' || %s::text || '%%')
+                      and (
+                        %s::text is null
+                        or exists (
+                            select 1
+                            from jsonb_array_elements_text(coalesce(mc.genres, '[]'::jsonb)) genre_value(value)
+                            where genre_value.value ilike '%%' || %s::text || '%%'
+                        )
+                      )
+                      and (
+                        %s::text is null
+                        or exists (
+                            select 1
+                            from jsonb_array_elements_text(coalesce(mc.tags, '[]'::jsonb)) tag_value(value)
+                            where tag_value.value ilike '%%' || %s::text || '%%'
+                        )
+                      )
+                ),
                 game_first_seen as (
                     select
                         g.id as game_id,
@@ -161,9 +248,9 @@ def get_leaderboard(
                 ),
                 current_ranked as (
                     select
-                        cr.*,
-                        row_number() over (order by cr.metric_value asc, cr.canonical_name asc) as position
-                    from current_rows cr
+                        fr.*,
+                        row_number() over (order by fr.metric_value asc, fr.canonical_name asc) as position
+                    from filtered_rows fr
                 ),
                 previous_ranked as (
                     select
@@ -190,12 +277,35 @@ def get_leaderboard(
                 order by cr.position asc
                 limit %s
                 """,
-                (storefront, window_days, window_days, window_days, limit),
+                (
+                    storefront,
+                    window_days,
+                    window_days,
+                    window_days,
+                    publisher_filter,
+                    publisher_filter,
+                    genre_filter,
+                    genre_filter,
+                    tag_filter,
+                    tag_filter,
+                    limit,
+                ),
             )
             rows = cur.fetchall()
 
     if not rows:
-        raise HTTPException(status_code=404, detail="No leaderboard found for that storefront.")
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select slug, name from storefronts where slug = %s", (storefront,))
+                storefront_row = cur.fetchone()
+        if not storefront_row:
+            raise HTTPException(status_code=404, detail="No leaderboard found for that storefront.")
+        return {
+            "storefront": {"slug": storefront_row[0], "name": display_storefront_name(storefront_row[0], storefront_row[1])},
+            "latest_date": None,
+            "view": view,
+            "entries": [],
+        }
 
     return {
         "storefront": {"slug": rows[0][0], "name": display_storefront_name(rows[0][0], rows[0][1])},
@@ -214,6 +324,93 @@ def get_leaderboard(
             }
             for row in rows
         ],
+    }
+
+
+@app.get("/leaderboard-facets")
+def get_leaderboard_facets(
+    storefront: str = Query(..., description="Storefront slug"),
+):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                with target_storefront as (
+                    select id, slug
+                    from storefronts
+                    where slug = %s
+                ),
+                metadata_candidates as (
+                    select distinct on (ga.game_id)
+                        ga.game_id,
+                        coalesce(gms.publisher, ga.publisher_raw) as publisher,
+                        coalesce(gms.genres, '[]'::jsonb) as genres,
+                        coalesce(gms.tags, '[]'::jsonb) as tags
+                    from game_aliases ga
+                    join storefronts sf on sf.id = ga.storefront_id
+                    join target_storefront ts on true
+                    left join lateral (
+                        select
+                            gms.captured_at,
+                            gms.publisher,
+                            gms.genres,
+                            gms.tags
+                        from game_metadata_snapshots gms
+                        where gms.game_alias_id = ga.id
+                        order by gms.captured_at desc
+                        limit 1
+                    ) gms on true
+                    where (
+                        (ts.slug like 'nutaku-%%' and sf.slug like 'nutaku-%%')
+                        or sf.slug = ts.slug
+                    )
+                    order by
+                        ga.game_id,
+                        case when gms.publisher is not null then 0 else 1 end,
+                        case when jsonb_array_length(coalesce(gms.genres, '[]'::jsonb)) > 0 then 0 else 1 end,
+                        case when jsonb_array_length(coalesce(gms.tags, '[]'::jsonb)) > 0 then 0 else 1 end,
+                        gms.captured_at desc nulls last,
+                        ga.updated_at desc
+                ),
+                publishers as (
+                    select distinct publisher
+                    from metadata_candidates
+                    where publisher is not null and publisher <> ''
+                ),
+                genres as (
+                    select distinct trim(value) as value
+                    from metadata_candidates mc,
+                    lateral jsonb_array_elements_text(mc.genres) genre(value)
+                    where trim(value) <> ''
+                ),
+                tags as (
+                    select distinct trim(value) as value
+                    from metadata_candidates mc,
+                    lateral jsonb_array_elements_text(mc.tags) tag(value)
+                    where trim(value) <> ''
+                )
+                select
+                    array(select publisher from publishers order by publisher asc),
+                    array(select value from genres order by value asc),
+                    array(select value from tags order by value asc)
+                """
+                ,
+                (storefront,),
+            )
+            row = cur.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="No facets found for that storefront.")
+
+    publishers = normalize_taxonomy_list(row[0] or [])
+    genres = normalize_taxonomy_list(row[1] or [])
+    tags = normalize_taxonomy_list(row[2] or [])
+
+    return {
+        "storefront": storefront,
+        "publishers": publishers,
+        "genres": genres,
+        "tags": tags,
     }
 
 
@@ -632,19 +829,23 @@ def get_game_summary(game_id: str):
                     coalesce(gms.publisher, ga.publisher_raw) as publisher,
                     gms.image_url,
                     gms.description,
+                    coalesce(gms.genres, '[]'::jsonb) as genres,
+                    coalesce(gms.tags, '[]'::jsonb) as tags,
                     gms.captured_at as metadata_captured_at
                 from game_aliases ga
                 join storefronts sf on sf.id = ga.storefront_id
                 left join lateral (
                     select
                         gms.captured_at,
-                        gms.developer,
-                        gms.publisher,
-                        gms.image_url,
-                        gms.description
-                    from game_metadata_snapshots gms
-                    where gms.game_alias_id = ga.id
-                    order by gms.captured_at desc
+                            gms.developer,
+                            gms.publisher,
+                            gms.image_url,
+                            gms.description,
+                            gms.genres,
+                            gms.tags
+                        from game_metadata_snapshots gms
+                        where gms.game_alias_id = ga.id
+                        order by gms.captured_at desc
                     limit 1
                 ) gms on true
                 where ga.game_id = %s
@@ -780,6 +981,8 @@ def get_game_summary(game_id: str):
             "publisher": row[5],
             "image_url": row[6],
             "description": row[7],
+            "genres": normalize_taxonomy_list(row[8] or []),
+            "tags": normalize_taxonomy_list(row[9] or []),
         }
 
     return {
