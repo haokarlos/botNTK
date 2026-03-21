@@ -140,6 +140,49 @@ a {
   margin-top: 16px;
 }
 
+.taxonomy-section {
+  margin-top: 14px;
+}
+
+.taxonomy-section__label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.taxonomy-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.taxonomy-chip,
+.taxonomy-inline-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(191, 79, 52, 0.18);
+  background: rgba(191, 79, 52, 0.08);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.taxonomy-chip {
+  min-height: 36px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 0.9rem;
+}
+
+.taxonomy-inline-link {
+  padding: 4px 8px;
+  border-radius: 10px;
+}
+
 .game-link-grid {
   display: grid;
   gap: 10px;
@@ -241,6 +284,18 @@ button[type="button"] {
   border: 1px solid var(--line);
   background: var(--surface);
   backdrop-filter: blur(14px);
+}
+
+.ranking-list {
+  display: grid;
+  gap: 12px;
+}
+
+.ranking-item__stats {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  color: var(--muted);
 }
 
 .metric-card {

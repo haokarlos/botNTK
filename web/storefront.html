@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Storefront View | BotNTK Market Radar</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-page="storefront">
+    <div class="page-shell">
+      <header class="hero hero--compact">
+        <div class="hero__eyebrow"><a href="/" class="back-link">Back to dashboard</a></div>
+        <div class="hero__grid">
+          <section>
+            <h1 id="storefront-title">Storefront</h1>
+            <p class="hero__copy" id="storefront-subtitle">Expanded board with filters and movement.</p>
+          </section>
+          <aside class="hero__panel">
+            <div class="metric-card">
+              <span class="metric-card__label">Snapshot date</span>
+              <strong id="storefront-date-label">-</strong>
+            </div>
+            <div class="metric-card">
+              <span class="metric-card__label">Rows shown</span>
+              <strong id="storefront-count-label">-</strong>
+            </div>
+            <div class="metric-card">
+              <span class="metric-card__label">View</span>
+              <strong id="storefront-view-label">-</strong>
+            </div>
+          </aside>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel controls">
+          <div class="field">
+            <label>Leaderboard view</label>
+            <div class="segmented" id="storefront-view-selector">
+              <button type="button" data-view="current" class="is-active">Day</button>
+              <button type="button" data-view="avg7">7D Avg</button>
+              <button type="button" data-view="avg30">30D Avg</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="storefront-publisher-filter-input">Publisher</label>
+            <input id="storefront-publisher-filter-input" type="search" list="storefront-publisher-filter-options" />
+            <datalist id="storefront-publisher-filter-options"></datalist>
+          </div>
+          <div class="field">
+            <label for="storefront-platform-filter-input">Platform</label>
+            <input id="storefront-platform-filter-input" type="search" list="storefront-platform-filter-options" />
+            <datalist id="storefront-platform-filter-options"></datalist>
+          </div>
+          <div class="field">
+            <label for="storefront-genre-filter-input">Genre</label>
+            <input id="storefront-genre-filter-input" type="search" list="storefront-genre-filter-options" />
+            <datalist id="storefront-genre-filter-options"></datalist>
+          </div>
+          <div class="field">
+            <label for="storefront-tag-filter-input">Tag</label>
+            <input id="storefront-tag-filter-input" type="search" list="storefront-tag-filter-options" />
+            <datalist id="storefront-tag-filter-options"></datalist>
+          </div>
+          <div class="field">
+            <label for="storefront-limit-select">Rows</label>
+            <select id="storefront-limit-select">
+              <option value="20">20</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <button id="storefront-apply-filters" type="button">Apply filters</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <h2>Expanded ranking</h2>
+            <span class="panel__subtle" id="storefront-ranking-subtitle">Loading…</span>
+          </div>
+          <div id="storefront-ranking-list" class="ranking-list"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+  </html>

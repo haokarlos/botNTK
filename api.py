@@ -59,6 +59,30 @@ def normalize_taxonomy_list(values):
     return deduped
 
 
+def platform_label_for_storefront_slug(slug: str) -> str | None:
+    return {
+        "nutaku-all-games": "Browser",
+        "nutaku-browser-ranking": "Browser",
+        "nutaku-mobile-ranking": "Android",
+        "erolabs-home-ranking": None,
+    }.get(slug)
+
+
+def derive_platforms_for_game_aliases(slugs):
+    platforms = []
+    seen = set()
+    for slug in slugs:
+        label = platform_label_for_storefront_slug(slug)
+        if not label:
+            continue
+        key = label.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        platforms.append(label)
+    return platforms
+
+
 @contextmanager
 def get_conn():
     conn = psycopg.connect(get_database_url())
@@ -76,6 +100,11 @@ def health():
 @app.get("/")
 def root():
     return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/storefront")
+def storefront_page():
+    return FileResponse(WEB_DIR / "storefront.html")
 
 
 @app.get("/game")
@@ -120,11 +149,13 @@ def get_leaderboard(
     publisher: str | None = Query(default=None, description="Publisher text filter"),
     genre: str | None = Query(default=None, description="Genre text filter"),
     tag: str | None = Query(default=None, description="Tag text filter"),
+    platform: str | None = Query(default=None, description="Platform text filter"),
 ):
     window_days = {"current": 1, "avg7": 7, "avg30": 30}[view]
     publisher_filter = publisher.strip() if publisher and publisher.strip() else None
     genre_filter = genre.strip() if genre and genre.strip() else None
     tag_filter = tag.strip() if tag and tag.strip() else None
+    platform_filter = platform.strip() if platform and platform.strip() else None
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -166,6 +197,31 @@ def get_leaderboard(
                 metadata_candidates as (
                     select distinct on (ga.game_id)
                         ga.game_id,
+                        array_remove(
+                            array[
+                                case
+                                    when exists (
+                                        select 1
+                                        from game_aliases gax
+                                        join storefronts sfx on sfx.id = gax.storefront_id
+                                        where gax.game_id = ga.game_id
+                                          and sfx.slug in ('nutaku-all-games', 'nutaku-browser-ranking')
+                                    ) then 'Browser'
+                                    else null
+                                end,
+                                case
+                                    when exists (
+                                        select 1
+                                        from game_aliases gax
+                                        join storefronts sfx on sfx.id = gax.storefront_id
+                                        where gax.game_id = ga.game_id
+                                          and sfx.slug = 'nutaku-mobile-ranking'
+                                    ) then 'Android'
+                                    else null
+                                end
+                            ],
+                            null
+                        ) as platforms,
                         coalesce(gms.publisher, ga.publisher_raw) as publisher,
                         coalesce(gms.genres, '[]'::jsonb) as genres,
                         coalesce(gms.tags, '[]'::jsonb) as tags
@@ -200,11 +256,20 @@ def get_leaderboard(
                     select
                         cr.*,
                         mc.publisher,
+                        mc.platforms,
                         mc.genres,
                         mc.tags
                     from current_rows cr
                     left join metadata_candidates mc on mc.game_id = cr.game_id
                     where (%s::text is null or coalesce(mc.publisher, '') ilike '%%' || %s::text || '%%')
+                      and (
+                        %s::text is null
+                        or exists (
+                            select 1
+                            from unnest(coalesce(mc.platforms, array[]::text[])) platform_value(value)
+                            where platform_value.value ilike '%%' || %s::text || '%%'
+                        )
+                      )
                       and (
                         %s::text is null
                         or exists (
@@ -284,6 +349,8 @@ def get_leaderboard(
                     window_days,
                     publisher_filter,
                     publisher_filter,
+                    platform_filter,
+                    platform_filter,
                     genre_filter,
                     genre_filter,
                     tag_filter,
@@ -343,6 +410,31 @@ def get_leaderboard_facets(
                 metadata_candidates as (
                     select distinct on (ga.game_id)
                         ga.game_id,
+                        array_remove(
+                            array[
+                                case
+                                    when exists (
+                                        select 1
+                                        from game_aliases gax
+                                        join storefronts sfx on sfx.id = gax.storefront_id
+                                        where gax.game_id = ga.game_id
+                                          and sfx.slug in ('nutaku-all-games', 'nutaku-browser-ranking')
+                                    ) then 'Browser'
+                                    else null
+                                end,
+                                case
+                                    when exists (
+                                        select 1
+                                        from game_aliases gax
+                                        join storefronts sfx on sfx.id = gax.storefront_id
+                                        where gax.game_id = ga.game_id
+                                          and sfx.slug = 'nutaku-mobile-ranking'
+                                    ) then 'Android'
+                                    else null
+                                end
+                            ],
+                            null
+                        ) as platforms,
                         coalesce(gms.publisher, ga.publisher_raw) as publisher,
                         coalesce(gms.genres, '[]'::jsonb) as genres,
                         coalesce(gms.tags, '[]'::jsonb) as tags
@@ -377,6 +469,12 @@ def get_leaderboard_facets(
                     from metadata_candidates
                     where publisher is not null and publisher <> ''
                 ),
+                platforms as (
+                    select distinct trim(value) as value
+                    from metadata_candidates mc,
+                    lateral unnest(coalesce(mc.platforms, array[]::text[])) platform(value)
+                    where trim(value) <> ''
+                ),
                 genres as (
                     select distinct trim(value) as value
                     from metadata_candidates mc,
@@ -391,6 +489,7 @@ def get_leaderboard_facets(
                 )
                 select
                     array(select publisher from publishers order by publisher asc),
+                    array(select value from platforms order by value asc),
                     array(select value from genres order by value asc),
                     array(select value from tags order by value asc)
                 """
@@ -403,12 +502,14 @@ def get_leaderboard_facets(
         raise HTTPException(status_code=404, detail="No facets found for that storefront.")
 
     publishers = normalize_taxonomy_list(row[0] or [])
-    genres = normalize_taxonomy_list(row[1] or [])
-    tags = normalize_taxonomy_list(row[2] or [])
+    platforms = normalize_taxonomy_list(row[1] or [])
+    genres = normalize_taxonomy_list(row[2] or [])
+    tags = normalize_taxonomy_list(row[3] or [])
 
     return {
         "storefront": storefront,
         "publishers": publishers,
+        "platforms": platforms,
         "genres": genres,
         "tags": tags,
     }
@@ -968,6 +1069,7 @@ def get_game_summary(game_id: str):
         or max(storefront_metric_payload, key=lambda row: row["tracked_days"], default=None)
     )
     storefront_metadata_payload = {}
+    game_platforms = derive_platforms_for_game_aliases([row[0] for row in storefront_metadata_rows])
     for row in storefront_metadata_rows:
         slug = row[0]
         if slug in storefront_metadata_payload:
@@ -983,6 +1085,7 @@ def get_game_summary(game_id: str):
             "description": row[7],
             "genres": normalize_taxonomy_list(row[8] or []),
             "tags": normalize_taxonomy_list(row[9] or []),
+            "platforms": derive_platforms_for_game_aliases([slug]) if slug.startswith("nutaku-") else [],
         }
 
     return {
@@ -1008,6 +1111,7 @@ def get_game_summary(game_id: str):
         "default_storefront_name": default_storefront["storefront_name"] if default_storefront else None,
         "storefront_metrics": storefront_metric_payload,
         "storefront_metadata": storefront_metadata_payload,
+        "platforms": game_platforms,
         "nutaku_estimate": (
             {
                 "metric_date": str(nutaku_estimate_row[0]) if nutaku_estimate_row[0] else None,
