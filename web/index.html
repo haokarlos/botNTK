@@ -113,6 +113,68 @@
 
         <section class="panel">
           <div class="panel__header">
+            <h2>Nutaku movers</h2>
+            <span class="panel__subtle" id="movers-subtitle">Biggest changes in the main Nutaku board</span>
+          </div>
+          <div class="board-grid">
+            <section class="compact-board">
+              <div class="compact-board__header">
+                <div>
+                  <h3>Biggest risers</h3>
+                </div>
+              </div>
+              <div id="nutaku-risers" class="compact-board__list"></div>
+            </section>
+            <section class="compact-board">
+              <div class="compact-board__header">
+                <div>
+                  <h3>Biggest fallers</h3>
+                </div>
+              </div>
+              <div id="nutaku-fallers" class="compact-board__list"></div>
+            </section>
+          </div>
+          <div class="board-grid board-grid--single">
+            <section class="compact-board">
+              <div class="compact-board__header">
+                <div>
+                  <h3>New entries</h3>
+                </div>
+              </div>
+              <div id="nutaku-new-entries" class="compact-board__list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <h2>Trending genres in Nutaku</h2>
+              <span class="panel__subtle" id="genre-trends-subtitle">Weighted share of the top versus the previous window</span>
+            </div>
+            <div class="trend-toolbar">
+              <div class="segmented segmented--compact" id="genre-trends-mode-selector">
+                <button type="button" data-mode="all" class="is-active">All genres</button>
+                <button type="button" data-mode="main">Main genre</button>
+              </div>
+              <div class="segmented segmented--compact" id="genre-trends-window-selector">
+                <button type="button" data-window="7" class="is-active">7D</button>
+                <button type="button" data-window="30">30D</button>
+                <button type="button" data-window="90">90D</button>
+              </div>
+              <div class="segmented segmented--compact" id="genre-trends-top-selector">
+                <button type="button" data-top="5">Top 5</button>
+                <button type="button" data-top="10">Top 10</button>
+                <button type="button" data-top="20" class="is-active">Top 20</button>
+                <button type="button" data-top="50">Top 50</button>
+              </div>
+            </div>
+          </div>
+          <div id="genre-trends-board" class="trend-board"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
             <h2>Search results</h2>
             <span class="panel__subtle">Jump to game history</span>
           </div>

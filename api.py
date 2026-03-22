@@ -515,6 +515,263 @@ def get_leaderboard_facets(
     }
 
 
+@app.get("/market-trends")
+def get_market_trends(
+    storefront: str = Query("nutaku-all-games", description="Storefront slug"),
+    window: int = Query(7, ge=7, le=90),
+    limit: int = Query(8, ge=1, le=20),
+    mode: str = Query("all", pattern="^(all|main)$"),
+    top_limit: int = Query(20, ge=5, le=50),
+    publisher: str | None = Query(default=None, description="Publisher text filter"),
+    genre: str | None = Query(default=None, description="Genre text filter"),
+    tag: str | None = Query(default=None, description="Tag text filter"),
+    platform: str | None = Query(default=None, description="Platform text filter"),
+):
+    if window not in {7, 30, 90}:
+        raise HTTPException(status_code=400, detail="window must be one of 7, 30, or 90")
+    if top_limit not in {5, 10, 20, 50}:
+        raise HTTPException(status_code=400, detail="top_limit must be one of 5, 10, 20, or 50")
+
+    publisher_filter = publisher.strip() if publisher and publisher.strip() else None
+    genre_filter = genre.strip() if genre and genre.strip() else None
+    tag_filter = tag.strip() if tag and tag.strip() else None
+    platform_filter = platform.strip() if platform and platform.strip() else None
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                with target_storefront as (
+                    select id, slug, name
+                    from storefronts
+                    where slug = %s
+                ),
+                latest_snapshot as (
+                    select max(rs.capture_date) as latest_date
+                    from ranking_snapshots rs
+                    join target_storefront ts on ts.id = rs.storefront_id
+                ),
+                bounds as (
+                    select
+                        latest_date,
+                        (latest_date - (%s::int - 1) * interval '1 day')::date as current_start,
+                        (latest_date - (%s::int * 2 - 1) * interval '1 day')::date as previous_start,
+                        (latest_date - %s::int * interval '1 day')::date as previous_end
+                    from latest_snapshot
+                ),
+                metadata_candidates as (
+                    select distinct on (ga.game_id)
+                        ga.game_id,
+                        array_remove(
+                            array[
+                                case
+                                    when exists (
+                                        select 1
+                                        from game_aliases gax
+                                        join storefronts sfx on sfx.id = gax.storefront_id
+                                        where gax.game_id = ga.game_id
+                                          and sfx.slug in ('nutaku-all-games', 'nutaku-browser-ranking')
+                                    ) then 'Browser'
+                                    else null
+                                end,
+                                case
+                                    when exists (
+                                        select 1
+                                        from game_aliases gax
+                                        join storefronts sfx on sfx.id = gax.storefront_id
+                                        where gax.game_id = ga.game_id
+                                          and sfx.slug = 'nutaku-mobile-ranking'
+                                    ) then 'Android'
+                                    else null
+                                end
+                            ],
+                            null
+                        ) as platforms,
+                        coalesce(gms.publisher, ga.publisher_raw) as publisher,
+                        coalesce(gms.genres, '[]'::jsonb) as genres,
+                        coalesce(gms.tags, '[]'::jsonb) as tags
+                    from game_aliases ga
+                    join storefronts sf on sf.id = ga.storefront_id
+                    join target_storefront ts on true
+                    left join lateral (
+                        select
+                            gms.captured_at,
+                            gms.publisher,
+                            gms.genres,
+                            gms.tags
+                        from game_metadata_snapshots gms
+                        where gms.game_alias_id = ga.id
+                        order by gms.captured_at desc
+                        limit 1
+                    ) gms on true
+                    where (
+                        (ts.slug like 'nutaku-%%' and sf.slug like 'nutaku-%%')
+                        or sf.slug = ts.slug
+                    )
+                    order by
+                        ga.game_id,
+                        case when gms.publisher is not null then 0 else 1 end,
+                        case when jsonb_array_length(coalesce(gms.genres, '[]'::jsonb)) > 0 then 0 else 1 end,
+                        case when jsonb_array_length(coalesce(gms.tags, '[]'::jsonb)) > 0 then 0 else 1 end,
+                        gms.captured_at desc nulls last,
+                        ga.updated_at desc
+                ),
+                filtered_metadata as (
+                    select *
+                    from metadata_candidates mc
+                    where (%s::text is null or coalesce(mc.publisher, '') ilike '%%' || %s::text || '%%')
+                      and (
+                        %s::text is null
+                        or exists (
+                            select 1
+                            from unnest(coalesce(mc.platforms, array[]::text[])) platform_value(value)
+                            where platform_value.value ilike '%%' || %s::text || '%%'
+                        )
+                      )
+                      and (
+                        %s::text is null
+                        or exists (
+                            select 1
+                            from jsonb_array_elements_text(coalesce(mc.genres, '[]'::jsonb)) genre_value(value)
+                            where genre_value.value ilike '%%' || %s::text || '%%'
+                        )
+                      )
+                      and (
+                        %s::text is null
+                        or exists (
+                            select 1
+                            from jsonb_array_elements_text(coalesce(mc.tags, '[]'::jsonb)) tag_value(value)
+                            where tag_value.value ilike '%%' || %s::text || '%%'
+                        )
+                      )
+                ),
+                ranked_rows as (
+                    select
+                        case
+                            when rs.capture_date between b.current_start and b.latest_date then 'current'
+                            when rs.capture_date between b.previous_start and b.previous_end then 'previous'
+                            else null
+                        end as period,
+                        fm.game_id,
+                        greatest((%s::int + 1) - re.rank, 1)::numeric as rank_weight,
+                        fm.genres
+                    from ranking_entries re
+                    join ranking_snapshots rs on rs.id = re.snapshot_id
+                    join target_storefront ts on ts.id = rs.storefront_id
+                    join bounds b on true
+                    join game_aliases ga on ga.id = re.game_alias_id
+                    join filtered_metadata fm on fm.game_id = ga.game_id
+                    where rs.capture_date between b.previous_start and b.latest_date
+                      and re.rank <= %s::int
+                      and jsonb_array_length(coalesce(fm.genres, '[]'::jsonb)) > 0
+                ),
+                expanded as (
+                    select
+                        rr.period,
+                        trim(genre_value.value) as genre,
+                        case
+                            when %s::text = 'main' then rr.rank_weight
+                            else rr.rank_weight / nullif(jsonb_array_length(rr.genres), 0)::numeric
+                        end as split_weight
+                    from ranked_rows rr
+                    cross join lateral jsonb_array_elements_text(
+                        case
+                            when %s::text = 'main' then jsonb_build_array(rr.genres ->> 0)
+                            else rr.genres
+                        end
+                    ) genre_value(value)
+                    where rr.period is not null
+                      and trim(genre_value.value) <> ''
+                ),
+                aggregated as (
+                    select
+                        genre,
+                        coalesce(sum(split_weight) filter (where period = 'current'), 0)::numeric as current_score,
+                        coalesce(sum(split_weight) filter (where period = 'previous'), 0)::numeric as previous_score
+                    from expanded
+                    group by genre
+                ),
+                totals as (
+                    select
+                        coalesce(sum(current_score), 0)::numeric as current_total,
+                        coalesce(sum(previous_score), 0)::numeric as previous_total
+                    from aggregated
+                )
+                select
+                    ts.slug,
+                    ts.name,
+                    b.latest_date,
+                    a.genre,
+                    a.current_score,
+                    a.previous_score,
+                    case
+                        when t.current_total > 0 then a.current_score / t.current_total
+                        else 0
+                    end as current_share,
+                    case
+                        when t.previous_total > 0 then a.previous_score / t.previous_total
+                        else 0
+                    end as previous_share
+                from aggregated a
+                join target_storefront ts on true
+                join bounds b on true
+                join totals t on true
+                where a.current_score > 0 or a.previous_score > 0
+                order by a.current_score desc, a.genre asc
+                limit %s
+                """,
+                (
+                    storefront,
+                    window,
+                    window,
+                    window,
+                    publisher_filter,
+                    publisher_filter,
+                    platform_filter,
+                    platform_filter,
+                    genre_filter,
+                    genre_filter,
+                    tag_filter,
+                    tag_filter,
+                    top_limit,
+                    top_limit,
+                    mode,
+                    mode,
+                    limit,
+                ),
+            )
+            rows = cur.fetchall()
+
+    if not rows:
+        return {
+            "storefront": {"slug": storefront, "name": display_storefront_name(storefront)},
+            "latest_date": None,
+            "window_days": window,
+            "mode": mode,
+            "top_limit": top_limit,
+            "entries": [],
+        }
+
+    return {
+        "storefront": {"slug": rows[0][0], "name": display_storefront_name(rows[0][0], rows[0][1])},
+        "latest_date": str(rows[0][2]),
+        "window_days": window,
+        "mode": mode,
+        "top_limit": top_limit,
+        "entries": [
+            {
+                "genre": normalize_taxonomy_value(row[3]),
+                "current_score": maybe_float(row[4]),
+                "previous_score": maybe_float(row[5]),
+                "current_share": maybe_float(row[6]),
+                "previous_share": maybe_float(row[7]),
+                "delta_share": maybe_float((row[6] or 0) - (row[7] or 0)),
+            }
+            for row in rows
+        ],
+    }
+
+
 @app.get("/rankings/current")
 def get_current_rankings(
     storefront: str = Query(..., description="Storefront slug, e.g. nutaku-browser-ranking"),

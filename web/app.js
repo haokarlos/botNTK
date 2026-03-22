@@ -67,6 +67,13 @@ function formatPercent(value) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function formatDeltaPercent(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  const points = value * 100;
+  const sign = points > 0 ? "+" : "";
+  return `${sign}${points.toFixed(1)} pts`;
+}
+
 function formatCurrencyRange(low, mid, high) {
   if ([low, mid, high].every((value) => value === null || value === undefined || Number.isNaN(value))) return "-";
   const formatter = new Intl.NumberFormat(undefined, {
@@ -258,6 +265,15 @@ async function initHome() {
   const nutakuBoardSubtitle = document.querySelector("#nutaku-board-subtitle");
   const erolabsBoardSubtitle = document.querySelector("#erolabs-board-subtitle");
   const nutakuMoreLink = document.querySelector("#nutaku-more-link");
+  const moversSubtitle = document.querySelector("#movers-subtitle");
+  const nutakuRisers = document.querySelector("#nutaku-risers");
+  const nutakuFallers = document.querySelector("#nutaku-fallers");
+  const nutakuNewEntries = document.querySelector("#nutaku-new-entries");
+  const genreTrendsBoard = document.querySelector("#genre-trends-board");
+  const genreTrendsSubtitle = document.querySelector("#genre-trends-subtitle");
+  const genreTrendsWindowSelector = document.querySelector("#genre-trends-window-selector");
+  const genreTrendsModeSelector = document.querySelector("#genre-trends-mode-selector");
+  const genreTrendsTopSelector = document.querySelector("#genre-trends-top-selector");
   const searchInput = document.querySelector("#search-input");
   const searchButton = document.querySelector("#search-button");
   const searchResults = document.querySelector("#search-results");
@@ -277,6 +293,9 @@ async function initHome() {
   let selectedPlatformFilter = "";
   let selectedGenreFilter = "";
   let selectedTagFilter = "";
+  let selectedTrendsWindow = "7";
+  let selectedTrendsMode = "all";
+  let selectedTrendsTop = "20";
 
   async function runSearch() {
     const query = searchInput.value.trim();
@@ -333,6 +352,45 @@ async function initHome() {
           </article>
         `
       )
+      .join("");
+  }
+
+  function renderHighlightBoard(container, entries, emptyMessage) {
+    if (!entries.length) {
+      renderEmpty(container, emptyMessage);
+      return;
+    }
+    renderCompactBoard(container, entries, entries.length);
+  }
+
+  function renderGenreTrends(container, entries) {
+    if (!entries.length) {
+      renderEmpty(container, "No genre trend signal with the active filters.");
+      return;
+    }
+
+    const maxShare = Math.max(...entries.map((entry) => entry.current_share || 0), 0.01);
+    container.innerHTML = entries
+      .map((entry) => {
+        const width = `${Math.max(((entry.current_share || 0) / maxShare) * 100, 6)}%`;
+        const deltaClass =
+          entry.delta_share > 0 ? "trend-row__delta--up" : entry.delta_share < 0 ? "trend-row__delta--down" : "trend-row__delta--flat";
+        return `
+          <article class="trend-row">
+            <div class="trend-row__header">
+              <strong>${entry.genre}</strong>
+              <span class="trend-row__share">${formatPercent(entry.current_share)}</span>
+            </div>
+            <div class="trend-row__bar-track">
+              <div class="trend-row__bar-fill" style="width: ${width};"></div>
+            </div>
+            <div class="trend-row__meta">
+              <span>Prev ${formatPercent(entry.previous_share)}</span>
+              <span class="trend-row__delta ${deltaClass}">${formatDeltaPercent(entry.delta_share)}</span>
+            </div>
+          </article>
+        `;
+      })
       .join("");
   }
 
@@ -396,6 +454,14 @@ async function initHome() {
     nutakuBoardSubtitle.textContent = `${formatDataSource(nutakuCurrent.data_source)} snapshot · top 20`;
     erolabsBoardSubtitle.textContent = `${formatDataSource(erolabsCurrent.data_source)} snapshot · top 20`;
     nutakuMoreLink.href = "/storefront?storefront=nutaku-all-games";
+    if (moversSubtitle) {
+      moversSubtitle.textContent =
+        selectedView === "current"
+          ? "Biggest daily rank changes and fresh Nutaku entries"
+          : selectedView === "avg7"
+            ? "Biggest 7-day average rank changes and new 7-day entrants"
+            : "Biggest 30-day average rank changes and new 30-day entrants";
+    }
 
     if (homeHideImputed.checked && nutakuCurrent.data_source === "imputed") {
       renderEmpty(nutakuBoard, "Nutaku latest snapshot is imputed. Disable the filter to show it.");
@@ -408,6 +474,57 @@ async function initHome() {
     } else {
       renderCompactBoard(erolabsBoard, erolabsCompact.entries, 20);
     }
+
+    const risers = [...nutakuCompact.entries]
+      .filter((entry) => !entry.is_new && entry.movement > 0)
+      .sort((left, right) => right.movement - left.movement || left.position - right.position)
+      .slice(0, 5);
+    const fallers = [...nutakuCompact.entries]
+      .filter((entry) => entry.movement < 0)
+      .sort((left, right) => left.movement - right.movement || left.position - right.position)
+      .slice(0, 5);
+    const newEntries = [...nutakuCompact.entries]
+      .filter((entry) => entry.is_new)
+      .sort((left, right) => left.position - right.position)
+      .slice(0, 5);
+
+    renderHighlightBoard(nutakuRisers, risers, "No strong risers with the active filters.");
+    renderHighlightBoard(nutakuFallers, fallers, "No strong fallers with the active filters.");
+    renderHighlightBoard(nutakuNewEntries, newEntries, "No new entries with the active filters.");
+  }
+
+  async function loadGenreTrends() {
+    if (!genreTrendsBoard) return;
+
+    const params = new URLSearchParams({
+      storefront: "nutaku-all-games",
+      window: selectedTrendsWindow,
+      mode: selectedTrendsMode,
+      top_limit: selectedTrendsTop,
+      limit: "8",
+    });
+    if (selectedPublisherFilter) params.set("publisher", selectedPublisherFilter);
+    if (selectedPlatformFilter) params.set("platform", selectedPlatformFilter);
+    if (selectedGenreFilter) params.set("genre", selectedGenreFilter);
+    if (selectedTagFilter) params.set("tag", selectedTagFilter);
+
+    const data = await fetchJson(`/market-trends?${params.toString()}`);
+    if (genreTrendsSubtitle) {
+      const modeLabel = selectedTrendsMode === "main" ? "main genre only" : "all genres split across each game";
+      genreTrendsSubtitle.textContent = `${modeLabel} · weighted share of the top ${selectedTrendsTop} versus the previous ${selectedTrendsWindow}-day window`;
+      const activeFilters = [
+        selectedPublisherFilter ? `publisher: ${selectedPublisherFilter}` : null,
+        selectedPlatformFilter ? `platform: ${selectedPlatformFilter}` : null,
+        selectedGenreFilter ? `genre: ${selectedGenreFilter}` : null,
+        selectedTagFilter ? `tag: ${selectedTagFilter}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      if (activeFilters) {
+        genreTrendsSubtitle.textContent += ` · filtered by ${activeFilters}`;
+      }
+    }
+    renderGenreTrends(genreTrendsBoard, data.entries || []);
   }
 
   async function loadHomeFacets() {
@@ -446,6 +563,7 @@ async function initHome() {
     selectedGenreFilter = genreFilterInput?.value.trim() || "";
     selectedTagFilter = tagFilterInput?.value.trim() || "";
     loadCompactLeaderboards();
+    loadGenreTrends();
   }
   homeViewSelector.querySelectorAll("button").forEach((button) => {
     button.addEventListener("click", () => {
@@ -457,6 +575,36 @@ async function initHome() {
   });
   if (applyHomeFiltersButton) {
     applyHomeFiltersButton.addEventListener("click", applyHomeFilters);
+  }
+  if (genreTrendsWindowSelector) {
+    genreTrendsWindowSelector.querySelectorAll("button").forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedTrendsWindow = button.dataset.window || "7";
+        genreTrendsWindowSelector.querySelectorAll("button").forEach((node) => node.classList.remove("is-active"));
+        button.classList.add("is-active");
+        loadGenreTrends();
+      });
+    });
+  }
+  if (genreTrendsModeSelector) {
+    genreTrendsModeSelector.querySelectorAll("button").forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedTrendsMode = button.dataset.mode || "all";
+        genreTrendsModeSelector.querySelectorAll("button").forEach((node) => node.classList.remove("is-active"));
+        button.classList.add("is-active");
+        loadGenreTrends();
+      });
+    });
+  }
+  if (genreTrendsTopSelector) {
+    genreTrendsTopSelector.querySelectorAll("button").forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedTrendsTop = button.dataset.top || "20";
+        genreTrendsTopSelector.querySelectorAll("button").forEach((node) => node.classList.remove("is-active"));
+        button.classList.add("is-active");
+        loadGenreTrends();
+      });
+    });
   }
   [publisherFilterInput, platformFilterInput, genreFilterInput, tagFilterInput].forEach((input) => {
     input?.addEventListener("keydown", (event) => {
@@ -477,7 +625,7 @@ async function initHome() {
     if (event.key === "Enter") runSearch();
   });
 
-  await Promise.all([loadCompactLeaderboards(), loadHomeFacets()]);
+  await Promise.all([loadCompactLeaderboards(), loadHomeFacets(), loadGenreTrends()]);
 }
 
 async function initGame() {
