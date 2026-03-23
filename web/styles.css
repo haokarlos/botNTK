@@ -178,6 +178,12 @@ a {
   font-size: 0.9rem;
 }
 
+.taxonomy-chip--muted {
+  color: var(--muted);
+  background: rgba(109, 98, 90, 0.08);
+  border-color: rgba(109, 98, 90, 0.14);
+}
+
 .taxonomy-inline-link {
   padding: 4px 8px;
   border-radius: 10px;
@@ -872,6 +878,10 @@ th {
 .back-link {
   color: var(--accent-strong);
   font-weight: 700;
+}
+
+.storefront-summary {
+  padding-top: 20px;
 }
 
 .alias-item {

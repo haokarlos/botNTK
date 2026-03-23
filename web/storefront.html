@@ -28,6 +28,10 @@
               <span class="metric-card__label">View</span>
               <strong id="storefront-view-label">-</strong>
             </div>
+            <div class="metric-card">
+              <span class="metric-card__label">Active filters</span>
+              <strong id="storefront-filter-count-label">0</strong>
+            </div>
           </aside>
         </div>
       </header>
@@ -44,22 +48,22 @@
           </div>
           <div class="field">
             <label for="storefront-publisher-filter-input">Publisher</label>
-            <input id="storefront-publisher-filter-input" type="search" list="storefront-publisher-filter-options" />
+            <input id="storefront-publisher-filter-input" type="search" list="storefront-publisher-filter-options" placeholder="e.g. Nutaku Publishing" />
             <datalist id="storefront-publisher-filter-options"></datalist>
           </div>
           <div class="field">
             <label for="storefront-platform-filter-input">Platform</label>
-            <input id="storefront-platform-filter-input" type="search" list="storefront-platform-filter-options" />
+            <input id="storefront-platform-filter-input" type="search" list="storefront-platform-filter-options" placeholder="e.g. Browser, Android" />
             <datalist id="storefront-platform-filter-options"></datalist>
           </div>
           <div class="field">
             <label for="storefront-genre-filter-input">Genre</label>
-            <input id="storefront-genre-filter-input" type="search" list="storefront-genre-filter-options" />
+            <input id="storefront-genre-filter-input" type="search" list="storefront-genre-filter-options" placeholder="e.g. Strategy, RPG, Idle" />
             <datalist id="storefront-genre-filter-options"></datalist>
           </div>
           <div class="field">
             <label for="storefront-tag-filter-input">Tag</label>
-            <input id="storefront-tag-filter-input" type="search" list="storefront-tag-filter-options" />
+            <input id="storefront-tag-filter-input" type="search" list="storefront-tag-filter-options" placeholder="e.g. Harem, Fantasy, Turn-Based" />
             <datalist id="storefront-tag-filter-options"></datalist>
           </div>
           <div class="field">
@@ -74,6 +78,14 @@
             <label>&nbsp;</label>
             <button id="storefront-apply-filters" type="button">Apply filters</button>
           </div>
+        </section>
+
+        <section class="panel storefront-summary">
+          <div class="panel__header">
+            <h2>Board context</h2>
+            <span class="panel__subtle" id="storefront-context-subtitle">Filters and current slice of the board</span>
+          </div>
+          <div id="storefront-active-filters" class="taxonomy-chip-list"></div>
         </section>
 
         <section class="panel">

@@ -74,6 +74,12 @@ function formatDeltaPercent(value) {
   return `${sign}${points.toFixed(1)} pts`;
 }
 
+function updateQueryParams(params) {
+  const url = new URL(window.location.href);
+  url.search = params.toString();
+  window.history.replaceState({}, "", url.toString());
+}
+
 function formatCurrencyRange(low, mid, high) {
   if ([low, mid, high].every((value) => value === null || value === undefined || Number.isNaN(value))) return "-";
   const formatter = new Intl.NumberFormat(undefined, {
@@ -453,7 +459,16 @@ async function initHome() {
 
     nutakuBoardSubtitle.textContent = `${formatDataSource(nutakuCurrent.data_source)} snapshot · top 20`;
     erolabsBoardSubtitle.textContent = `${formatDataSource(erolabsCurrent.data_source)} snapshot · top 20`;
-    nutakuMoreLink.href = "/storefront?storefront=nutaku-all-games";
+    const moreParams = new URLSearchParams({
+      storefront: "nutaku-all-games",
+      view: selectedView,
+      limit: "50",
+    });
+    if (selectedPublisherFilter) moreParams.set("publisher", selectedPublisherFilter);
+    if (selectedPlatformFilter) moreParams.set("platform", selectedPlatformFilter);
+    if (selectedGenreFilter) moreParams.set("genre", selectedGenreFilter);
+    if (selectedTagFilter) moreParams.set("tag", selectedTagFilter);
+    nutakuMoreLink.href = `/storefront?${moreParams.toString()}`;
     if (moversSubtitle) {
       moversSubtitle.textContent =
         selectedView === "current"
@@ -1120,6 +1135,9 @@ async function initStorefront() {
   const dateLabel = document.querySelector("#storefront-date-label");
   const countLabel = document.querySelector("#storefront-count-label");
   const viewLabel = document.querySelector("#storefront-view-label");
+  const filterCountLabel = document.querySelector("#storefront-filter-count-label");
+  const activeFiltersList = document.querySelector("#storefront-active-filters");
+  const contextSubtitle = document.querySelector("#storefront-context-subtitle");
   const rankingSubtitle = document.querySelector("#storefront-ranking-subtitle");
   const rankingList = document.querySelector("#storefront-ranking-list");
   const viewSelector = document.querySelector("#storefront-view-selector");
@@ -1146,6 +1164,32 @@ async function initStorefront() {
     };
   }
 
+  function renderActiveFilters(filters) {
+    const chips = [
+      filters.publisher ? `Publisher: ${filters.publisher}` : null,
+      filters.platform ? `Platform: ${filters.platform}` : null,
+      filters.genre ? `Genre: ${filters.genre}` : null,
+      filters.tag ? `Tag: ${filters.tag}` : null,
+      `Rows: ${filters.limit}`,
+      `View: ${selectedView === "current" ? "Day" : selectedView === "avg7" ? "7D Avg" : "30D Avg"}`,
+    ].filter(Boolean);
+
+    if (filterCountLabel) {
+      filterCountLabel.textContent = String([filters.publisher, filters.platform, filters.genre, filters.tag].filter(Boolean).length);
+    }
+    if (contextSubtitle) {
+      contextSubtitle.textContent =
+        storefront === "nutaku-all-games"
+          ? "Expanded Nutaku board with inherited filters from the dashboard."
+          : "Expanded storefront board with active filters and board slice.";
+    }
+    if (activeFiltersList) {
+      activeFiltersList.innerHTML = chips
+        .map((chip) => `<span class="taxonomy-chip taxonomy-chip--muted">${chip}</span>`)
+        .join("");
+    }
+  }
+
   async function loadFacets() {
     const facets = await fetchJson(`/leaderboard-facets?storefront=${encodeURIComponent(storefront)}`);
     if (publisherOptions) publisherOptions.innerHTML = (facets.publishers || []).map((value) => `<option value="${value}"></option>`).join("");
@@ -1165,22 +1209,28 @@ async function initStorefront() {
     if (filters.platform) params.set("platform", filters.platform);
     if (filters.genre) params.set("genre", filters.genre);
     if (filters.tag) params.set("tag", filters.tag);
+    updateQueryParams(params);
 
     const data = await fetchJson(`/leaderboards?${params.toString()}`);
     titleLabel.textContent = data.storefront?.name || "Storefront";
     subtitleLabel.textContent =
       storefront === "nutaku-all-games"
-        ? "Expanded Nutaku board with filters and movement."
-        : "Expanded storefront board.";
+        ? "Expanded Nutaku board with filters, movement, and drill-down context."
+        : "Expanded storefront board with filters and movement.";
     dateLabel.textContent = formatDate(data.latest_date);
     countLabel.textContent = String(data.entries.length);
     viewLabel.textContent = selectedView === "current" ? "Day" : selectedView === "avg7" ? "7D Avg" : "30D Avg";
+    renderActiveFilters(filters);
     rankingSubtitle.textContent =
       selectedView === "current"
         ? "Daily position with movement"
         : selectedView === "avg7"
           ? "7-day average rank vs previous 7-day window"
           : "30-day average rank vs previous 30-day window";
+    const activeFilterSummary = [filters.publisher, filters.platform, filters.genre, filters.tag].filter(Boolean).length;
+    if (activeFilterSummary) {
+      rankingSubtitle.textContent += ` · ${activeFilterSummary} active filter${activeFilterSummary === 1 ? "" : "s"}`;
+    }
 
     if (!data.entries.length) {
       renderEmpty(rankingList, "No rows found with the active filters.");
