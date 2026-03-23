@@ -511,7 +511,8 @@ async function initHome() {
     const data = await fetchJson(`/market-trends?${params.toString()}`);
     if (genreTrendsSubtitle) {
       const modeLabel = selectedTrendsMode === "main" ? "main genre only" : "all genres split across each game";
-      genreTrendsSubtitle.textContent = `${modeLabel} · weighted share of the top ${selectedTrendsTop} versus the previous ${selectedTrendsWindow}-day window`;
+      const windowLabel = selectedTrendsWindow === "365" ? "1-year" : `${selectedTrendsWindow}-day`;
+      genreTrendsSubtitle.textContent = `${modeLabel} · weighted share of the top ${selectedTrendsTop} versus the previous ${windowLabel} window`;
       const activeFilters = [
         selectedPublisherFilter ? `publisher: ${selectedPublisherFilter}` : null,
         selectedPlatformFilter ? `platform: ${selectedPlatformFilter}` : null,

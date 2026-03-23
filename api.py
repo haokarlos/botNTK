@@ -518,7 +518,7 @@ def get_leaderboard_facets(
 @app.get("/market-trends")
 def get_market_trends(
     storefront: str = Query("nutaku-all-games", description="Storefront slug"),
-    window: int = Query(7, ge=7, le=90),
+    window: int = Query(7, ge=7, le=365),
     limit: int = Query(8, ge=1, le=20),
     mode: str = Query("all", pattern="^(all|main)$"),
     top_limit: int = Query(20, ge=5, le=50),
@@ -527,8 +527,8 @@ def get_market_trends(
     tag: str | None = Query(default=None, description="Tag text filter"),
     platform: str | None = Query(default=None, description="Platform text filter"),
 ):
-    if window not in {7, 30, 90}:
-        raise HTTPException(status_code=400, detail="window must be one of 7, 30, or 90")
+    if window not in {7, 30, 90, 365}:
+        raise HTTPException(status_code=400, detail="window must be one of 7, 30, 90, or 365")
     if top_limit not in {5, 10, 20, 50}:
         raise HTTPException(status_code=400, detail="top_limit must be one of 5, 10, 20, or 50")
 
