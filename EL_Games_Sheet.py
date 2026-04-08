@@ -84,26 +84,53 @@ def get_ero_labs_top_game_names():
         driver.get(ero_labs_url)
 
         wait = WebDriverWait(driver, 20)
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.home__topGameName')))
+        wait.until(
+            lambda d: d.find_elements(By.CSS_SELECTOR, '.home__topGameName, a[href*="game.html?id="]')
+        )
 
-        soup = BeautifulSoup(driver.page_source, 'html.parser')
         entries = []
         seen_titles = set()
-        for element in soup.select('.home__topGameName h4'):
-            title = element.get_text(strip=True)
+        candidate_elements = driver.find_elements(
+            By.CSS_SELECTOR,
+            '.home__topGameName h4, .home__topGameName, .home__topGameBox a[href*="game.html?id="], a[href*="game.html?id="]',
+        )
+
+        for element in candidate_elements:
+            anchor = None
+            if element.tag_name.lower() == 'a':
+                anchor = element
+            else:
+                try:
+                    anchor = element.find_element(By.XPATH, './ancestor::a[@href][1]')
+                except Exception:
+                    try:
+                        anchor = element.find_element(By.XPATH, './/a[@href]')
+                    except Exception:
+                        anchor = None
+
+            title = element.text.strip()
+            if not title and anchor is not None:
+                title = anchor.text.strip()
+
+            if not title and anchor is not None:
+                alt = anchor.get_attribute('aria-label') or anchor.get_attribute('title')
+                title = (alt or '').strip()
+
             if not title or title in seen_titles:
                 continue
 
-            anchor = element.find_parent('a', href=True)
-            if anchor is None:
-                parent = element.parent
-                if parent:
-                    anchor = parent.find('a', href=True)
+            href = anchor.get_attribute('href') if anchor is not None else None
+            if not href or 'game.html?id=' not in href:
+                continue
 
-            url = absolutize_url(ero_labs_url, anchor.get('href')) if anchor else None
-
-            entries.append({'title': title, 'url': url})
+            entries.append({'title': title, 'url': absolutize_url(ero_labs_url, href)})
             seen_titles.add(title)
+
+        if len(entries) < 5:
+            raise RuntimeError(
+                f'EroLabs devolvio muy pocas entradas ({len(entries)}). Probable cambio de DOM/selectors.'
+            )
+
         return entries
     finally:
         driver.quit()
