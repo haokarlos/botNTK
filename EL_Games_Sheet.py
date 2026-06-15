@@ -80,6 +80,17 @@ def get_ero_labs_top_game_names():
 
     driver = webdriver.Chrome(options=chrome_options)
 
+    def clean_erolabs_title(raw_title):
+        blocked_lines = {'play', 'download', 'play now', 'online', 'web'}
+        for line in raw_title.splitlines():
+            candidate = ' '.join(line.split()).strip()
+            if not candidate:
+                continue
+            if candidate.casefold() in blocked_lines:
+                continue
+            return candidate
+        return ' '.join(raw_title.split()).strip()
+
     try:
         driver.get(ero_labs_url)
 
@@ -88,43 +99,41 @@ def get_ero_labs_top_game_names():
             lambda d: d.find_elements(By.CSS_SELECTOR, '.home__topGameName, a[href*="game.html?id="]')
         )
 
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
         entries = []
+        seen_urls = set()
         seen_titles = set()
-        candidate_elements = driver.find_elements(
-            By.CSS_SELECTOR,
-            '.home__topGameName h4, .home__topGameName, .home__topGameBox a[href*="game.html?id="], a[href*="game.html?id="]',
-        )
 
-        for element in candidate_elements:
-            anchor = None
-            if element.tag_name.lower() == 'a':
-                anchor = element
-            else:
-                try:
-                    anchor = element.find_element(By.XPATH, './ancestor::a[@href][1]')
-                except Exception:
-                    try:
-                        anchor = element.find_element(By.XPATH, './/a[@href]')
-                    except Exception:
-                        anchor = None
-
-            title = element.text.strip()
-            if not title and anchor is not None:
-                title = anchor.text.strip()
-
-            if not title and anchor is not None:
-                alt = anchor.get_attribute('aria-label') or anchor.get_attribute('title')
-                title = (alt or '').strip()
-
-            if not title or title in seen_titles:
+        for anchor in soup.select('a.home__topGame[href*="game.html?id="], a[href*="game.html?id="]'):
+            href = anchor.get('href')
+            if not href or href in seen_urls:
                 continue
 
-            href = anchor.get_attribute('href') if anchor is not None else None
-            if not href or 'game.html?id=' not in href:
+            title_node = (
+                anchor.select_one('.home__topGameH4')
+                or anchor.select_one('.home__topGameName h4')
+                or anchor.select_one('.home__topGameName')
+                or anchor.select_one('[class*="GameName"]')
+                or anchor.select_one('[class*="gameName"]')
+                or anchor.select_one('h4')
+                or anchor.select_one('h3')
+            )
+            title = clean_erolabs_title(title_node.get_text('\n', strip=True)) if title_node else ''
+
+            if not title:
+                title = clean_erolabs_title(anchor.get_text('\n', strip=True))
+
+            if not title:
+                alt = anchor.get('aria-label') or anchor.get('title')
+                title = clean_erolabs_title(alt or '')
+
+            normalized_title = title.casefold()
+            if not title or normalized_title in seen_titles:
                 continue
 
             entries.append({'title': title, 'url': absolutize_url(ero_labs_url, href)})
-            seen_titles.add(title)
+            seen_urls.add(href)
+            seen_titles.add(normalized_title)
 
         if len(entries) < 5:
             raise RuntimeError(
